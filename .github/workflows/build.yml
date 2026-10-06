@@ -21,6 +21,8 @@ jobs:
 
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
+      with:
+        packages: ''   # <-- ВОТ ЭТО ГЛАВНОЕ. Пустая строка = ничего лишнего не ставить
 
     # Этот шаг вручную устанавливает Gradle 8.9, чтобы точно совпало с AGP 8.5.2
     - name: Setup Gradle 8.9
