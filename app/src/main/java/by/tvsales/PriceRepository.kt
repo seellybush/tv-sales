@@ -8,90 +8,84 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.URLEncoder
 
-// Модель для поиска (легковесная)
+// === Модели для search_products ===
 @Serializable
-data class OnlinerSearchResult(
-    val products: List<OnlinerProductSummary> = emptyList()
+data class SearchResponse(
+    val status: String = "",
+    val data: SearchData = SearchData()
 )
 
 @Serializable
-data class OnlinerProductSummary(
+data class SearchData(
+    val products: List<ProductSummary> = emptyList(),
+    val total: Int = 0
+)
+
+@Serializable
+data class ProductSummary(
     val id: Long = 0,
     val key: String = "",
     val name: String = "",
-    val full_name: String = "",
-    val prices: OnlinerPrices? = null
+    val name_prefix: String = "",
+    val manufacturer: String = "",
+    val description: String = "",
+    val price_min: PriceAmount? = null,
+    val price_max: PriceAmount? = null,
+    val offers_count: Int? = null
 )
 
 @Serializable
-data class OnlinerPrices(
-    val price_min: Double? = null,
-    val price_max: Double? = null,
-    val offers: List<Offer> = emptyList()
+data class PriceAmount(
+    val amount: Double = 0.0,
+    val currency: String = "BYN"
 )
-
-@Serializable
-data class Offer(
-    val price: Double = 0.0,
-    val shop: Shop? = null
-)
-
-@Serializable
-data class Shop(val name: String = "")
 
 object PriceRepository {
     private val client = OkHttpClient()
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
+    // 🔑 Твой API-ключ
+    private const val API_KEY = "pmx_3c60c7a62efd2d9954d003e44e87fe31"
+    
+    // ⚠️ СЮДА ВСТАВЬ ID СКРИПТА ИЗ URL Parse.bot
+    // Посмотри адрес, когда нажимаешь "Send Request": 
+    // https://api.parse.bot/scraper/XXXXXXXX-XXXX-XXXX/...
+    // Вот эти XXXX — и есть SCRAPER_ID
+    private const val SCRAPER_ID = "ВСТАВЬ_ID_СКРИПТА"
+
     // 1. Поиск моделей для автодополнения
-    suspend fun searchModels(query: String): List<OnlinerProductSummary> = withContext(Dispatchers.IO) {
-        if (query.length < 3) return@withContext emptyList()
+    suspend fun searchModels(query: String): List<ProductSummary> = withContext(Dispatchers.IO) {
+        if (query.length < 2) return@withContext emptyList()
         try {
             val encoded = URLEncoder.encode(query, "UTF-8")
-            // Запрос к API Onliner для поиска (неофициальный эндпоинт)
-            val url = "https://catalog.onliner.by/sdapi/catalog.api/search/products?query=$encoded&limit=10"
+            val url = "https://api.parse.bot/scraper/$SCRAPER_ID/search_products?query=$encoded&page=1"
+            
             val req = Request.Builder()
                 .url(url)
-                .header("User-Agent", "Mozilla/5.0 (Android)")
+                .header("X-API-Key", API_KEY)
                 .header("Accept", "application/json")
                 .build()
 
             val resp = client.newCall(req).execute()
+            if (!resp.isSuccessful) return@withContext emptyList()
             val body = resp.body?.string() ?: return@withContext emptyList()
-            val parsed = json.decodeFromString<OnlinerSearchResult>(body)
-            parsed.products
+            
+            println("SEARCH_RESPONSE: $body")
+            
+            val parsed = json.decodeFromString<SearchResponse>(body)
+            parsed.data.products
         } catch (e: Exception) {
             e.printStackTrace()
             emptyList()
         }
     }
 
-    // 2. Поиск цены именно в 5 элементе
-    suspend fun findPriceIn5Element(modelName: String): Pair<Double, String>? = withContext(Dispatchers.IO) {
-        try {
-            val encoded = URLEncoder.encode(modelName, "UTF-8")
-            val url = "https://catalog.onliner.by/sdapi/catalog.api/search/products?query=$encoded&limit=5"
-            val req = Request.Builder()
-                .url(url)
-                .header("User-Agent", "Mozilla/5.0 (Android TV Sales)")
-                .header("Accept", "application/json")
-                .build()
-
-            val resp = client.newCall(req).execute()
-            val body = resp.body?.string() ?: return@withContext null
-            val parsed = json.decodeFromString<OnlinerSearchResult>(body)
-            val product = parsed.products.firstOrNull() ?: return@withContext null
-
-            val offers = product.prices?.offers ?: emptyList()
-            // Ищем ТОЛЬКО 5 элемент
-            val fiveElement = offers.firstOrNull {
-                it.shop?.name?.contains("5 элемент", ignoreCase = true) == true
-            }
-            
-            fiveElement?.let { it.price to (it.shop?.name ?: "5 элемент") }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
-        }
+    // 2. Поиск цены именно в 5element
+    // ⚠️ ВРЕМЕННО: возвращает минимальную цену из search_products
+    // Как только пришлёшь JSON от get_product_offers — перепишу
+    suspend fun findPriceIn5Element(product: ProductSummary): Pair<Double, String>? = withContext(Dispatchers.IO) {
+        // TODO: заменить на запрос get_product_offers?id=${product.id}
+        val price = product.price_min?.amount ?: return@withContext null
+        price to "Onliner (мин. цена)"
     }
 }
