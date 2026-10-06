@@ -17,8 +17,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -29,13 +29,12 @@ import java.util.Locale
 // --- Цветовая палитра "Светлый лазурит" ---
 val LightLazuriteBg = Color(0xFFF4F7FC)
 val LightLazuriteCard = Color(0xFFFFFFFF)
-val LightLazuritePrimary = Color(0xFF3A86FF) // Основной синий
-val LightLazuritePrimaryDark = Color(0xFF2E6BCC)
+val LightLazuritePrimary = Color(0xFF3A86FF)
 val LightLazuriteText = Color(0xFF1A1A1A)
 val LightLazuriteTextSecondary = Color(0xFF6E6E6E)
 val LightLazuriteAccentGreen = Color(0xFF2ECC71)
+val LightLazuriteAccentRed = Color(0xFFE74C3C)
 
-// --- Модели данных (упрощенные) ---
 data class Sale(val model: String, val price: Double, val employee: String)
 
 val employees = listOf("Егор", "Максим", "Вова")
@@ -64,10 +63,11 @@ class MainActivity : ComponentActivity() {
 fun App() {
     var tab by remember { mutableIntStateOf(0) }
     var sales by remember { mutableStateOf(listOf<Sale>()) }
+    // Выбранный сотрудник — глобальный, используется на экране парсера
+    var currentEmployee by remember { mutableStateOf(employees.first()) }
 
     Scaffold(
         topBar = {
-            // Заголовок "ПАРСЕР ЖОРИЧА"
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -88,15 +88,24 @@ fun App() {
                 val items = listOf(
                     Triple("Парсер", Icons.Default.Search, 0),
                     Triple("Продажи", Icons.Default.List, 1),
-                    Triple("Планы", Icons.Default.DateRange, 2),
-                    Triple("Настройки", Icons.Default.Settings, 3)
+                    Triple("Настройки", Icons.Default.Settings, 2)
                 )
                 items.forEach { (label, icon, index) ->
                     NavigationBarItem(
                         selected = tab == index,
                         onClick = { tab = index },
-                        icon = { Icon(icon, contentDescription = label, tint = if(tab == index) LightLazuritePrimary else LightLazuriteTextSecondary) },
-                        label = { Text(label, color = if(tab == index) LightLazuritePrimary else LightLazuriteTextSecondary) },
+                        icon = {
+                            Icon(
+                                icon, contentDescription = label,
+                                tint = if (tab == index) LightLazuritePrimary else LightLazuriteTextSecondary
+                            )
+                        },
+                        label = {
+                            Text(
+                                label,
+                                color = if (tab == index) LightLazuritePrimary else LightLazuriteTextSecondary
+                            )
+                        },
                         colors = NavigationBarItemDefaults.colors(
                             indicatorColor = LightLazuritePrimary.copy(alpha = 0.1f)
                         )
@@ -108,10 +117,16 @@ fun App() {
     ) { p ->
         Box(Modifier.padding(p)) {
             when (tab) {
-                0 -> ScanScreen { sales = sales + it; tab = 1 }
-                1 -> SalesScreen(sales)
-                2 -> PlansScreen(sales)
-                3 -> SettingsScreen()
+                0 -> ScanScreen(
+                    currentEmployee = currentEmployee,
+                    onEmployeeChange = { currentEmployee = it },
+                    onSaleAdded = { sales = sales + it; tab = 1 }
+                )
+                1 -> SalesScreen(
+                    sales = sales,
+                    onDelete = { saleToRemove -> sales = sales - saleToRemove }
+                )
+                2 -> SettingsScreen(sales)
             }
         }
     }
@@ -119,17 +134,19 @@ fun App() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScanScreen(save: (Sale) -> Unit) {
+fun ScanScreen(
+    currentEmployee: String,
+    onEmployeeChange: (String) -> Unit,
+    onSaleAdded: (Sale) -> Unit
+) {
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
     var suggestions by remember { mutableStateOf(listOf<OnlinerProductSummary>()) }
     var selectedProduct by remember { mutableStateOf<OnlinerProductSummary?>(null) }
-    var parsedPrice by remember { mutableStateOf<Double?>(null) }
-    var priceSource by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("Введите модель телевизора") }
     var loading by remember { mutableStateOf(false) }
 
-    // Дебаунс для поиска
+    // Дебаунс поиска
     LaunchedEffect(query) {
         if (query.length >= 3) {
             delay(500)
@@ -145,7 +162,8 @@ fun ScanScreen(save: (Sale) -> Unit) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Карточка поиска
+        // === 1. ВЫБОР СОТРУДНИКА — ПЕРВЫМ ===
+        var empExpanded by remember { mutableStateOf(false) }
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
@@ -153,15 +171,58 @@ fun ScanScreen(save: (Sale) -> Unit) {
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(Modifier.padding(16.dp)) {
-                Text("Поиск модели", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text("Кто продаёт?", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Spacer(Modifier.height(8.dp))
-                
+                ExposedDropdownMenuBox(
+                    expanded = empExpanded,
+                    onExpandedChange = { empExpanded = !empExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = currentEmployee,
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(empExpanded)
+                        },
+                        modifier = Modifier
+                            .menuAnchor()
+                            .fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    ExposedDropdownMenu(
+                        expanded = empExpanded,
+                        onDismissRequest = { empExpanded = false }
+                    ) {
+                        employees.forEach { name ->
+                            DropdownMenuItem(
+                                text = { Text(name) },
+                                onClick = {
+                                    onEmployeeChange(name)
+                                    empExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // === 2. ПОИСК МОДЕЛИ ===
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
+            elevation = CardDefaults.cardElevation(2.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Модель телевизора", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Spacer(Modifier.height(8.dp))
+
                 OutlinedTextField(
                     value = query,
-                    onValueChange = { 
+                    onValueChange = {
                         query = it
                         selectedProduct = null
-                        parsedPrice = null
                         message = "Введите модель..."
                     },
                     label = { Text("Например: Samsung UE55") },
@@ -169,14 +230,16 @@ fun ScanScreen(save: (Sale) -> Unit) {
                     shape = RoundedCornerShape(12.dp),
                     trailingIcon = {
                         if (query.isNotEmpty()) {
-                            IconButton(onClick = { query = ""; suggestions = emptyList() }) {
+                            IconButton(onClick = {
+                                query = ""
+                                suggestions = emptyList()
+                            }) {
                                 Icon(Icons.Default.Clear, "Очистить")
                             }
                         }
                     }
                 )
 
-                // Выпадающий список подсказок
                 AnimatedVisibility(visible = suggestions.isNotEmpty() && selectedProduct == null) {
                     LazyColumn(
                         modifier = Modifier
@@ -198,9 +261,17 @@ fun ScanScreen(save: (Sale) -> Unit) {
                                 colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)
                             ) {
                                 Column(Modifier.padding(12.dp)) {
-                                    Text(product.full_name, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                                    Text(
+                                        product.full_name,
+                                        fontWeight = FontWeight.Medium,
+                                        fontSize = 14.sp
+                                    )
                                     product.prices?.price_min?.let {
-                                        Text("от $it BYN", color = LightLazuritePrimary, fontSize = 12.sp)
+                                        Text(
+                                            "от $it BYN",
+                                            color = LightLazuritePrimary,
+                                            fontSize = 12.sp
+                                        )
                                     }
                                 }
                             }
@@ -210,7 +281,7 @@ fun ScanScreen(save: (Sale) -> Unit) {
             }
         }
 
-        // Карточка результата парсинга
+        // === 3. ВЫБРАННЫЙ ТОВАР ===
         if (selectedProduct != null) {
             Card(
                 shape = RoundedCornerShape(16.dp),
@@ -218,30 +289,14 @@ fun ScanScreen(save: (Sale) -> Unit) {
                 elevation = CardDefaults.cardElevation(4.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Выбранный товар", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Text(selectedProduct!!.full_name, fontWeight = FontWeight.Medium, fontSize = 18.sp)
-                    
-                    if (parsedPrice != null) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(Icons.Default.CheckCircle, null, tint = LightLazuriteAccentGreen)
-                            Text(
-                                text = "Цена в 5 элементе: ${parsedPrice} BYN",
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = LightLazuriteAccentGreen
-                            )
-                        }
-                        Text("Источник: $priceSource", fontSize = 12.sp, color = LightLazuriteTextSecondary)
-                    }
+                Column(Modifier.padding(16.dp)) {
+                    Text("Выбрано", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = LightLazuriteTextSecondary)
+                    Text(selectedProduct!!.full_name, fontWeight = FontWeight.Medium, fontSize = 16.sp)
                 }
             }
         }
 
-        // Кнопка парсинга
+        // === 4. КНОПКА ПАРСИНГА ===
         Button(
             onClick = {
                 val product = selectedProduct ?: return@Button
@@ -250,11 +305,13 @@ fun ScanScreen(save: (Sale) -> Unit) {
                 scope.launch {
                     val result = PriceRepository.findPriceIn5Element(product.full_name)
                     if (result != null) {
-                        parsedPrice = result.first
-                        priceSource = result.second
-                        message = "Цена найдена!"
+                        // Сразу добавляем продажу на выбранного сотрудника
+                        onSaleAdded(Sale(product.full_name, result.first, currentEmployee))
+                        message = "Добавлено: ${result.first} BYN на $currentEmployee (${result.second})"
+                        query = ""
+                        selectedProduct = null
                     } else {
-                        message = "5 элемент не торгует этой моделью, либо цена не найдена."
+                        message = "5 элемент не торгует этой моделью"
                     }
                     loading = false
                 }
@@ -270,86 +327,77 @@ fun ScanScreen(save: (Sale) -> Unit) {
             } else {
                 Icon(Icons.Default.Search, null)
                 Spacer(Modifier.width(8.dp))
-                Text("Спарсить цену", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text("Спарсить и добавить", fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
         }
 
-        // Выбор сотрудника
-        if (parsedPrice != null) {
-            var emp by remember { mutableStateOf("Егор") }
-            var expanded by remember { mutableStateOf(false) }
-            
-            ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
-                OutlinedTextField(
-                    value = emp,
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Продал сотрудник") },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-                    modifier = Modifier
-                        .menuAnchor()
-                        .fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                )
-                ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    employees.forEach { name ->
-                        DropdownMenuItem(
-                            text = { Text(name) },
-                            onClick = { emp = name; expanded = false }
-                        )
-                    }
-                }
-            }
-
-            Button(
-                onClick = {
-                    save(Sale(selectedProduct!!.full_name, parsedPrice!!, emp))
-                    query = ""; selectedProduct = null; parsedPrice = null; suggestions = emptyList()
-                    message = "Продажа сохранена!"
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = LightLazuriteAccentGreen)
-            ) {
-                Icon(Icons.Default.Add, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Добавить продажу", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-
-        // Сообщение статуса
         Text(
             text = message,
             fontSize = 14.sp,
             color = LightLazuriteTextSecondary,
             modifier = Modifier.fillMaxWidth(),
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            textAlign = TextAlign.Center
         )
     }
 }
 
 @Composable
-fun SalesScreen(sales: List<Sale>) {
+fun SalesScreen(sales: List<Sale>, onDelete: (Sale) -> Unit) {
     Column(Modifier.padding(16.dp)) {
-        Text("История продаж", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        Text("Всего: ${sales.sumOf { it.price }} BYN", fontSize = 16.sp, color = LightLazuritePrimary)
-        Spacer(Modifier.height(12.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(sales) { sale ->
-                Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
-                    elevation = CardDefaults.cardElevation(1.dp)
-                ) {
-                    ListItem(
-                        headlineContent = { Text(sale.model, fontWeight = FontWeight.Medium) },
-                        supportingContent = { Text("${sale.price} BYN · ${sale.employee}") },
-                        trailingContent = {
-                            Icon(Icons.Default.Check, null, tint = LightLazuriteAccentGreen)
+        Text("Статистика продаж", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Всего: ${"%.2f".format(sales.sumOf { it.price })} BYN",
+            fontSize = 18.sp,
+            color = LightLazuritePrimary,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(Modifier.height(16.dp))
+        Text("Последние продажи", fontSize = 16.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(8.dp))
+
+        // Показываем последние 3 продажи (свежие сверху)
+        val recent = sales.takeLast(3).reversed()
+
+        if (recent.isEmpty()) {
+            Text(
+                "Пока нет продаж",
+                color = LightLazuriteTextSecondary,
+                modifier = Modifier.padding(vertical = 16.dp)
+            )
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(recent) { sale ->
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
+                        elevation = CardDefaults.cardElevation(1.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(sale.model, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                                Text(
+                                    "${sale.price} BYN · ${sale.employee}",
+                                    fontSize = 12.sp,
+                                    color = LightLazuriteTextSecondary
+                                )
+                            }
+                            IconButton(onClick = { onDelete(sale) }) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Удалить",
+                                    tint = LightLazuriteAccentRed
+                                )
+                            }
                         }
-                    )
+                    }
                 }
             }
         }
@@ -357,62 +405,83 @@ fun SalesScreen(sales: List<Sale>) {
 }
 
 @Composable
-fun PlansScreen(sales: List<Sale>) {
+fun SettingsScreen(sales: List<Sale>) {
     var plans by remember {
         mutableStateOf(mapOf("Егор" to 25000.0, "Максим" to 22000.0, "Вова" to 20000.0))
     }
-    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Планы на месяц", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        employees.forEach { name ->
-            val fact = sales.filter { it.employee == name }.sumOf { it.price }
-            var input by remember { mutableStateOf((plans[name] ?: 0.0).toString()) }
-            
-            Card(
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
-                elevation = CardDefaults.cardElevation(1.dp)
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(name, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    
-                    OutlinedTextField(
-                        value = input,
-                        onValueChange = { input = it },
-                        label = { Text("План BYN") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                    
-                    val percent = if ((plans[name] ?: 0.0) > 0) (fact / (plans[name] ?: 1.0) * 100) else 0.0
-                    Text("Факт: $fact BYN", fontSize = 14.sp)
-                    Text("Выполнение: ${"%.1f".format(percent)}%", 
-                        color = if (percent >= 100) LightLazuriteAccentGreen else LightLazuritePrimary,
-                        fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    
-                    Button(
-                        onClick = { input.toDoubleOrNull()?.let { plans = plans + (name to it) } },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
-                    ) { Text("Сохранить") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text("Настройки", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+
+        // === Планы ===
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
+            elevation = CardDefaults.cardElevation(2.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Планы на месяц", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+
+                employees.forEach { name ->
+                    val fact = sales.filter { it.employee == name }.sumOf { it.price }
+                    var input by remember { mutableStateOf((plans[name] ?: 0.0).toString()) }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(name, fontWeight = FontWeight.Medium, fontSize = 15.sp)
+
+                        OutlinedTextField(
+                            value = input,
+                            onValueChange = { input = it },
+                            label = { Text("План BYN") },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp)
+                        )
+
+                        val percent = if ((plans[name] ?: 0.0) > 0)
+                            (fact / (plans[name] ?: 1.0) * 100) else 0.0
+
+                        Text("Факт: $fact BYN", fontSize = 13.sp)
+                        Text(
+                            "Выполнение: ${"%.1f".format(percent)}%",
+                            color = if (percent >= 100) LightLazuriteAccentGreen else LightLazuritePrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+
+                        Button(
+                            onClick = {
+                                input.toDoubleOrNull()?.let { plans = plans + (name to it) }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Сохранить план")
+                        }
+                        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                    }
                 }
             }
         }
-    }
-}
 
-@Composable
-fun SettingsScreen() {
-    Column(Modifier.padding(16.dp)) {
-        Text("Настройки", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(12.dp))
+        // === Информация ===
         Card(
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = LightLazuriteCard)
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
+            elevation = CardDefaults.cardElevation(2.dp),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Версия приложения: 0.4.0")
-                Text("Сотрудники: Егор, Максим, Вова")
-                Text("Парсер: Onliner (5 элемент)")
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("Версия: 0.4.0", fontSize = 14.sp)
+                Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp)
+                Text("Источник цен: Onliner (5 элемент)", fontSize = 14.sp)
             }
         }
     }
