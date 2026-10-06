@@ -2,41 +2,99 @@ package by.tvsales
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.URLEncoder
-import java.util.regex.Pattern
+
+// === Модели для Diginetica ===
+@Serializable
+data class DigineticaResponse(
+    val query: String = "",
+    val products: List<DigineticaProduct> = emptyList()
+)
+
+@Serializable
+data class DigineticaProduct(
+    val id: String = "",
+    val name: String = "",
+    val brand: String = "",
+    val price: String = "",
+    val oldPrice: String? = null,
+    val link_url: String = "",
+    val categories: List<DigineticaCategory> = emptyList()
+)
+
+@Serializable
+data class DigineticaCategory(
+    val id: String = "",
+    val name: String = "",
+    val link_url: String = ""
+)
 
 data class FiveElementProduct(
-    val code: String = "",
+    val id: String = "",
     val name: String = "",
     val price: Double = 0.0,
+    val oldPrice: Double? = null,
     val diagonal: String = "",
     val url: String = ""
 )
 
 object PriceRepository {
     private val client = OkHttpClient()
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    // 🔍 Поиск по 5element.by — прямой парсинг HTML
+    // 🔑 Публичный API-ключ Diginetica (из запроса 5element.by)
+    private const val DIGINETICA_API_KEY = "08IE0509XQ"
+    private const val DIGINETICA_URL = "https://autocomplete.diginetica.net/autocomplete"
+
+    // 🔍 Поиск телевизоров через Diginetica (тот же поиск, что на 5element.by)
     suspend fun searchTVs(query: String): List<FiveElementProduct> = withContext(Dispatchers.IO) {
         if (query.length < 1) return@withContext emptyList()
         try {
             val encoded = URLEncoder.encode(query, "UTF-8")
-            // Поиск в разделе телевизоров (1403)
-            val url = "https://5element.by/catalog/1403-televizory?q=$encoded"
+            val url = "$DIGINETICA_URL?st=$encoded" +
+                    "&apiKey=$DIGINETICA_API_KEY" +
+                    "&strategy=advanced_xname%2Czero_queries" +
+                    "&productsSize=50" +          // ← до 50 товаров
+                    "&regionId=global" +
+                    "&forIs=true" +
+                    "&showUnavailable=true" +
+                    "&withContent=false" +
+                    "&withSku=false"
 
             val req = Request.Builder()
                 .url(url)
                 .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                .header("Accept", "text/html,application/xhtml+xml")
-                .header("Accept-Language", "ru-RU,ru;q=0.9")
+                .header("Accept", "application/json")
                 .build()
 
             val resp = client.newCall(req).execute()
-            val html = resp.body?.string() ?: return@withContext emptyList()
+            if (!resp.isSuccessful) return@withContext emptyList()
+            val body = resp.body?.string() ?: return@withContext emptyList()
 
-            parseProducts(html)
+            println("DIGINETICA_RESPONSE: $body")
+
+            val parsed = json.decodeFromString<DigineticaResponse>(body)
+
+            // Фильтр: только телевизоры
+            parsed.products
+                .filter { product ->
+                    product.categories.any { it.name.contains("Телевизор", ignoreCase = true) }
+                }
+                .map { product ->
+                    FiveElementProduct(
+                        id = product.id,
+                        name = product.name,
+                        price = product.price.toDoubleOrNull() ?: 0.0,
+                        oldPrice = product.oldPrice?.toDoubleOrNull(),
+                        diagonal = extractDiagonal(product.name),
+                        url = "https://5element.by${product.link_url}"
+                    )
+                }
+                .filter { it.price > 50 }  // отсеиваем мусор
         } catch (e: Exception) {
             e.printStackTrace()
             emptyList()
@@ -47,11 +105,10 @@ object PriceRepository {
     suspend fun findPrice(modelName: String): Pair<Double, String>? = withContext(Dispatchers.IO) {
         try {
             val products = searchTVs(modelName)
-            // Ищем точное совпадение по модели (без "Телевизор")
             val match = products.firstOrNull {
                 it.name.contains(modelName, ignoreCase = true)
             } ?: products.firstOrNull()
-            
+
             match?.let { it.price to "5element.by" }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -59,65 +116,12 @@ object PriceRepository {
         }
     }
 
-    // 🧠 Парсинг HTML — вытаскиваем JSON из data-product='{...}'
-    private fun parseProducts(html: String): List<FiveElementProduct> {
-        val products = mutableListOf<FiveElementProduct>()
-
-        // Главная регулярка: JSON внутри data-product='{...}'
-        val dataProductPattern = Pattern.compile(
-            "data-product='(\\{[^']+\\})'"
-        )
-
-        val matcher = dataProductPattern.matcher(html)
-        while (matcher.find()) {
-            val json = matcher.group(1) ?: continue
-
-            val id = extractJsonValue(json, "id")
-            val name = extractJsonValue(json, "name")
-            val priceStr = extractJsonValue(json, "price")
-            val category = extractJsonValue(json, "category_name")
-
-            // Фильтр: только телевизоры
-            if (!name.contains("Телевизор", ignoreCase = true)) continue
-            if (category.isNotEmpty() && !category.contains("Телевизор", ignoreCase = true)) continue
-
-            val price = priceStr.toDoubleOrNull() ?: continue
-            if (price < 50) continue
-
-            // Извлекаем диагональ из названия: "Телевизор Samsung UE55M80HAUXPY" → "55"
-            val diagonal = extractDiagonal(name)
-
-            products.add(
-                FiveElementProduct(
-                    code = id,
-                    name = name,
-                    price = price,
-                    diagonal = diagonal,
-                    url = "https://5element.by/products/$id"
-                )
-            )
-        }
-
-        return products.distinctBy { it.code }
-    }
-
     // 📐 Извлечение диагонали из названия
     private fun extractDiagonal(name: String): String {
-        // Ищем паттерн: цифры 2-3 знака, опционально перед " или после букв
-        // Примеры: "55QNED72", "43QLED780K", "UE55M80HAUXPY" → 55
-        val pattern = Pattern.compile("(?:UE|QN|OLED|QLED|NU|U|M|F|G|C|P|H|B|A|KU|KS|MU|KU|K|J|S|X|W|V|T|R|L|E|D|X|W|V|T|R|L|E|D|[A-Z])?(\\d{2,3})(?:[A-Z]|$)")
-        val matcher = pattern.matcher(name.uppercase())
-        return if (matcher.find()) matcher.group(1) ?: "" else ""
-    }
-
-    // 🔧 Простой парсер значений из JSON-строки
-    private fun extractJsonValue(json: String, key: String): String {
-        val pattern = Pattern.compile("\"$key\"\\s*:\\s*(\"([^\"]*)\"|([\\d.]+))")
-        val matcher = pattern.matcher(json)
-        return if (matcher.find()) {
-            matcher.group(2) ?: matcher.group(3) ?: ""
-        } else {
-            ""
-        }
+        // Ищем паттерн: 2-3 цифры, опционально перед буквами
+        // Примеры: "55QNED72B6B", "43QLED780K", "UE55M80HAUXPY" → 55
+        val pattern = Regex("(\\d{2,3})(?:[A-Z]|\\s|$)")
+        val match = pattern.find(name.uppercase())
+        return match?.groupValues?.get(1) ?: ""
     }
 }
