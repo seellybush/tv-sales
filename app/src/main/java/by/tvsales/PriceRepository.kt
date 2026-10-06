@@ -56,20 +56,21 @@ object PriceRepository {
             val parsed = json.decodeFromString<OnlinerSearchResponse>(body)
             val product = parsed.products.firstOrNull() ?: return@withContext null
 
-            val offers = product.prices.values.flatMap { it.offers }
+            // Явно указываем тип, чтобы компилятор не путался
+            val offers: List<Offer> = product.prices.values.flatMap { offer: PriceOffer ->
+                offer.offers
+            }
 
-// Ищем ТОЛЬКО 5 элемент
-val fiveElement = offers.firstOrNull { 
-    it.shop?.name?.contains("5 элемент", ignoreCase = true) == true 
-}
+            // Ищем ТОЛЬКО 5 элемент (с проверкой на null)
+            val fiveElement: Offer? = offers.firstOrNull { offer: Offer ->
+                offer.shop?.name?.contains("5 элемент", ignoreCase = true) == true
+            }
 
-if (fiveElement == null) {
-    // 5element нет — возвращаем null, приложение оставит старую цену
-    return@withContext null
-}
+            if (fiveElement == null) {
+                return@withContext null
+            }
 
-fiveElement.price to fiveElement.shop.name
-            chosen?.let { it.price to (it.shop?.name ?: "Onliner") }
+            fiveElement.price to (fiveElement.shop?.name ?: "5 элемент")
         } catch (e: Exception) {
             e.printStackTrace()
             null
