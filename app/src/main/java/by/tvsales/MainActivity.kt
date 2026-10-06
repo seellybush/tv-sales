@@ -268,19 +268,19 @@ fun ScanScreen(
                                     .padding(vertical = 4.dp)
                                     .clickable {
                                         selectedProduct = product
-                                        query = product.full_name
+                                        query = product.name
                                         suggestions = emptyList()
-                                        message = "Выбрано: ${product.full_name}"
+                                        message = "Выбрано: ${product.name}"
                                     },
                                 colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)
                             ) {
                                 Column(Modifier.padding(12.dp)) {
                                     Text(
-                                        product.full_name,
+                                        product.name,
                                         fontWeight = FontWeight.Medium,
                                         fontSize = 14.sp
                                     )
-                                    product.prices?.price_min?.let {
+                                    product.price_min?.amount?.let {
                                         Text(
                                             "от $it BYN",
                                             color = LightLazuritePrimary,
@@ -305,7 +305,7 @@ fun ScanScreen(
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Text("Выбрано", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = LightLazuriteTextSecondary)
-                    Text(selectedProduct!!.full_name, fontWeight = FontWeight.Medium, fontSize = 16.sp)
+                    Text(selectedProduct!!.name, fontWeight = FontWeight.Medium, fontSize = 16.sp)
                 }
             }
         }
@@ -319,7 +319,7 @@ fun ScanScreen(
                 scope.launch {
                     val result = PriceRepository.findPriceIn5Element(product.key)
                     if (result != null) {
-                        onSaleAdded(Sale(product.full_name, result.first, currentEmployee))
+                        onSaleAdded(Sale(product.name, result.first, currentEmployee))
                         message = "Добавлено: ${result.first} BYN на $currentEmployee (${result.second})"
                         query = ""
                         selectedProduct = null
