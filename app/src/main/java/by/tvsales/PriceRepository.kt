@@ -57,9 +57,18 @@ object PriceRepository {
             val product = parsed.products.firstOrNull() ?: return@withContext null
 
             val offers = product.prices.values.flatMap { it.offers }
-            val fiveElement = offers.firstOrNull { it.shop?.name?.contains("5 элемент", true) == true }
-            val chosen = fiveElement ?: offers.minByOrNull { it.price }
 
+// Ищем ТОЛЬКО 5 элемент
+val fiveElement = offers.firstOrNull { 
+    it.shop?.name?.contains("5 элемент", ignoreCase = true) == true 
+}
+
+if (fiveElement == null) {
+    // 5element нет — возвращаем null, приложение оставит старую цену
+    return@withContext null
+}
+
+fiveElement.price to fiveElement.shop.name
             chosen?.let { it.price to (it.shop?.name ?: "Onliner") }
         } catch (e: Exception) {
             e.printStackTrace()
