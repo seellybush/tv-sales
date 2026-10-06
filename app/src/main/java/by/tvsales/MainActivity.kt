@@ -255,47 +255,36 @@ fun ScanScreen(
                 )
 
                 AnimatedVisibility(visible = suggestions.isNotEmpty() && selectedProduct == null) {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 200.dp)
-                            .padding(top = 8.dp)
-                    ) 
-                    if (product.diagonal.isNotEmpty()) {
-    Text("Диагональ: ${product.diagonal}\"", fontSize = 11.sp, color = LightLazuriteTextSecondary)
-}
-                    {
-                        items(suggestions) { product ->
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp)
-                                    .clickable {
-                                        selectedProduct = product
-                                        query = product.name
-                                        suggestions = emptyList()
-                                        message = "Выбрано: ${product.name}"
-                                    },
-                                colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)
-                            ) {
-                                Column(Modifier.padding(12.dp)) {
-                                    Text(
-                                        product.name,
-                                        fontWeight = FontWeight.Medium,
-                                        fontSize = 14.sp
-                                    )
-                                    product.price?.let {
-                                        Text(
-                                            "от $it BYN",
-                                            color = LightLazuritePrimary,
-                                            fontSize = 12.sp
-                                        )
-                                    }
-                                }
-                            }
-                        }
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 250.dp)
+            .padding(top = 8.dp)
+    ) {
+        items(suggestions.size) { index ->
+            val product = suggestions[index]
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+                    .clickable {
+                        selectedProduct = product
+                        query = product.name
+                        suggestions = emptyList()
+                        message = "Выбрано: ${product.name}"
+                    },
+                colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)
+            ) {
+                Column(Modifier.padding(12.dp)) {
+                    Text(product.name, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                    product.price?.let {
+                        Text("от $it BYN", color = LightLazuritePrimary, fontSize = 12.sp)
                     }
                 }
+            }
+        }
+    }
+}
             }
         }
 
