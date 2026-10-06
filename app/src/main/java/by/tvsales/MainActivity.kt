@@ -317,7 +317,7 @@ fun ScanScreen(
                 loading = true
                 message = "Парсинг цены в 5 элементе..."
                 scope.launch {
-                    val result = PriceRepository.findPriceIn5Element(product.full_name)
+                    val result = PriceRepository.findPriceIn5Element(product.key)
                     if (result != null) {
                         onSaleAdded(Sale(product.full_name, result.first, currentEmployee))
                         message = "Добавлено: ${result.first} BYN на $currentEmployee (${result.second})"
