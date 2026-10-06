@@ -1,0 +1,22 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Телевизор -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M30,35h48c2.2,0 4,1.8 4,4v30c0,2.2 -1.8,4 -4,4H30c-2.2,0 -4,-1.8 -4,-4V39C26,36.8 27.8,35 30,35z"/>
+    <!-- Экран -->
+    <path
+        android:fillColor="#3A86FF"
+        android:pathData="M32,40h44v24H32z"/>
+    <!-- Стрелка роста цены -->
+    <path
+        android:fillColor="#2ECC71"
+        android:pathData="M40,58l8,-8l6,6l10,-12l6,6l-14,16l-6,-6l-8,8z"/>
+    <!-- Подставка -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M50,73h8v8h-8z"/>
+</vector>
