@@ -260,7 +260,11 @@ fun ScanScreen(
                             .fillMaxWidth()
                             .heightIn(max = 200.dp)
                             .padding(top = 8.dp)
-                    ) {
+                    ) 
+                    if (product.diagonal.isNotEmpty()) {
+    Text("Диагональ: ${product.diagonal}\"", fontSize = 11.sp, color = LightLazuriteTextSecondary)
+}
+                    {
                         items(suggestions) { product ->
                             Card(
                                 modifier = Modifier
