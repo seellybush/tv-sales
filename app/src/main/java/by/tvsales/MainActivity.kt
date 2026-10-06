@@ -16,11 +16,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -74,6 +78,7 @@ fun App() {
                 Modifier
                     .fillMaxWidth()
                     .background(LightLazuritePrimary)
+                    .statusBarsPadding()
                     .padding(vertical = 16.dp, horizontal = 20.dp)
             ) {
                 Text(
@@ -179,22 +184,24 @@ fun ScanScreen(
                     expanded = empExpanded,
                     onExpandedChange = { empExpanded = !empExpanded }
                 ) {
-                    OutlinedTextField(
-                        value = currentEmployee,
-                        onValueChange = {},
-                        readOnly = true,
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(empExpanded)
-                        },
-                        modifier = Modifier
-                            .menuAnchor()
-                            .fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    ExposedDropdownMenu(
-                        expanded = empExpanded,
-                        onDismissRequest = { empExpanded = false }
-                    ) {
+                   OutlinedTextField(
+    value = query,
+    onValueChange = { query = it },
+    label = { Text("Например: Samsung UE55") },
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(12.dp),
+    singleLine = true,  // ← не даёт полю растягиваться
+    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),  // ← меняет кнопку на «Поиск»
+    keyboardActions = KeyboardActions(
+        onSearch = {
+            // запускаем поиск сразу по Enter
+            scope.launch {
+                suggestions = PriceRepository.searchModels(query)
+            }
+        }
+    ),
+    trailingIcon = { ... }
+)
                         employees.forEach { name ->
                             DropdownMenuItem(
                                 text = { Text(name) },
