@@ -40,26 +40,46 @@ data class PriceAmount(
     val currency: String = "BYN"
 )
 
+// === Модели для get_product_offers ===
+@Serializable
+data class OffersResponse(
+    val status: String = "",
+    val data: OffersData = OffersData()
+)
+
+@Serializable
+data class OffersData(
+    val product_key: String = "",
+    val offers: List<ShopOffer> = emptyList(),
+    val offers_count: Int = 0,
+    val min_price: PriceAmount? = null
+)
+
+@Serializable
+data class ShopOffer(
+    val offer_id: String = "",
+    val shop_id: Int = 0,
+    val shop_name: String = "",
+    val shop_url: String = "",
+    val price: PriceAmount = PriceAmount(),
+    val warranty_months: Int = 0
+)
+
 object PriceRepository {
     private val client = OkHttpClient()
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    // 🔑 Твой API-ключ
+    // 🔑 Твой API-ключ и ID скрипта
     private const val API_KEY = "pmx_3c60c7a62efd2d9954d003e44e87fe31"
-    
-    // ⚠️ СЮДА ВСТАВЬ ID СКРИПТА ИЗ URL Parse.bot
-    // Посмотри адрес, когда нажимаешь "Send Request": 
-    // https://api.parse.bot/scraper/XXXXXXXX-XXXX-XXXX/...
-    // Вот эти XXXX — и есть SCRAPER_ID
-    private const val SCRAPER_ID = "ВСТАВЬ_ID_СКРИПТА"
+    private const val SCRAPER_ID = "2c3e3cc7-b56c-4867-b591-78b13607cfc1"
 
-    // 1. Поиск моделей для автодополнения
+    // 1. Поиск моделей
     suspend fun searchModels(query: String): List<ProductSummary> = withContext(Dispatchers.IO) {
         if (query.length < 2) return@withContext emptyList()
         try {
             val encoded = URLEncoder.encode(query, "UTF-8")
             val url = "https://api.parse.bot/scraper/$SCRAPER_ID/search_products?query=$encoded&page=1"
-            
+
             val req = Request.Builder()
                 .url(url)
                 .header("X-API-Key", API_KEY)
@@ -69,9 +89,9 @@ object PriceRepository {
             val resp = client.newCall(req).execute()
             if (!resp.isSuccessful) return@withContext emptyList()
             val body = resp.body?.string() ?: return@withContext emptyList()
-            
+
             println("SEARCH_RESPONSE: $body")
-            
+
             val parsed = json.decodeFromString<SearchResponse>(body)
             parsed.data.products
         } catch (e: Exception) {
@@ -80,12 +100,42 @@ object PriceRepository {
         }
     }
 
-    // 2. Поиск цены именно в 5element
-    // ⚠️ ВРЕМЕННО: возвращает минимальную цену из search_products
-    // Как только пришлёшь JSON от get_product_offers — перепишу
-    suspend fun findPriceIn5Element(product: ProductSummary): Pair<Double, String>? = withContext(Dispatchers.IO) {
-        // TODO: заменить на запрос get_product_offers?id=${product.id}
-        val price = product.price_min?.amount ?: return@withContext null
-        price to "Onliner (мин. цена)"
+    // 2. Поиск цены именно в 5element по ключу товара
+    suspend fun findPriceIn5Element(productKey: String): Pair<Double, String>? = withContext(Dispatchers.IO) {
+        try {
+            val encoded = URLEncoder.encode(productKey, "UTF-8")
+            val url = "https://api.parse.bot/scraper/$SCRAPER_ID/get_product_offers?id=$encoded"
+
+            val req = Request.Builder()
+                .url(url)
+                .header("X-API-Key", API_KEY)
+                .header("Accept", "application/json")
+                .build()
+
+            val resp = client.newCall(req).execute()
+            if (!resp.isSuccessful) return@withContext null
+            val body = resp.body?.string() ?: return@withContext null
+
+            println("OFFERS_RESPONSE: $body")
+
+            val parsed = json.decodeFromString<OffersResponse>(body)
+
+            // Ищем ТОЛЬКО 5 элемент
+            val fiveElement = parsed.data.offers.firstOrNull {
+                it.shop_name.contains("5 элемент", ignoreCase = true) ||
+                it.shop_name.contains("5элемент", ignoreCase = true) ||
+                it.shop_name.contains("5element", ignoreCase = true) ||
+                it.shop_name.contains("5 element", ignoreCase = true)
+            }
+
+            if (fiveElement == null) {
+                return@withContext null
+            }
+
+            fiveElement.price.amount to fiveElement.shop_name
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
     }
 }
