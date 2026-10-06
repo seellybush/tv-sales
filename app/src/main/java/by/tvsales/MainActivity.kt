@@ -10,21 +10,20 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -69,7 +68,6 @@ class MainActivity : ComponentActivity() {
 fun App() {
     var tab by remember { mutableIntStateOf(0) }
     var sales by remember { mutableStateOf(listOf<Sale>()) }
-    // Выбранный сотрудник — глобальный, используется на экране парсера
     var currentEmployee by remember { mutableStateOf(employees.first()) }
 
     Scaffold(
@@ -153,10 +151,10 @@ fun ScanScreen(
     var message by remember { mutableStateOf("Введите модель телевизора") }
     var loading by remember { mutableStateOf(false) }
 
-    // Дебаунс поиска
+    // Автопоиск с задержкой (когда пользователь перестал печатать)
     LaunchedEffect(query) {
         if (query.length >= 3) {
-            delay(500)
+            delay(600)
             suggestions = PriceRepository.searchModels(query)
         } else {
             suggestions = emptyList()
@@ -169,7 +167,7 @@ fun ScanScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // === 1. ВЫБОР СОТРУДНИКА — ПЕРВЫМ ===
+        // === 1. ВЫБОР СОТРУДНИКА ===
         var empExpanded by remember { mutableStateOf(false) }
         Card(
             shape = RoundedCornerShape(16.dp),
@@ -184,24 +182,22 @@ fun ScanScreen(
                     expanded = empExpanded,
                     onExpandedChange = { empExpanded = !empExpanded }
                 ) {
-                   OutlinedTextField(
-    value = query,
-    onValueChange = { query = it },
-    label = { Text("Например: Samsung UE55") },
-    modifier = Modifier.fillMaxWidth(),
-    shape = RoundedCornerShape(12.dp),
-    singleLine = true,  // ← не даёт полю растягиваться
-    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),  // ← меняет кнопку на «Поиск»
-    keyboardActions = KeyboardActions(
-        onSearch = {
-            // запускаем поиск сразу по Enter
-            scope.launch {
-                suggestions = PriceRepository.searchModels(query)
-            }
-        }
-    ),
-    trailingIcon = { ... }
-)
+                    OutlinedTextField(
+                        value = currentEmployee,
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(empExpanded)
+                        },
+                        modifier = Modifier
+                            .menuAnchor()
+                            .fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    ExposedDropdownMenu(
+                        expanded = empExpanded,
+                        onDismissRequest = { empExpanded = false }
+                    ) {
                         employees.forEach { name ->
                             DropdownMenuItem(
                                 text = { Text(name) },
@@ -237,6 +233,15 @@ fun ScanScreen(
                     label = { Text("Например: Samsung UE55") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(
+                        onSearch = {
+                            scope.launch {
+                                suggestions = PriceRepository.searchModels(query)
+                            }
+                        }
+                    ),
                     trailingIcon = {
                         if (query.isNotEmpty()) {
                             IconButton(onClick = {
@@ -314,7 +319,6 @@ fun ScanScreen(
                 scope.launch {
                     val result = PriceRepository.findPriceIn5Element(product.full_name)
                     if (result != null) {
-                        // Сразу добавляем продажу на выбранного сотрудника
                         onSaleAdded(Sale(product.full_name, result.first, currentEmployee))
                         message = "Добавлено: ${result.first} BYN на $currentEmployee (${result.second})"
                         query = ""
@@ -367,7 +371,6 @@ fun SalesScreen(sales: List<Sale>, onDelete: (Sale) -> Unit) {
         Text("Последние продажи", fontSize = 16.sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(8.dp))
 
-        // Показываем последние 3 продажи (свежие сверху)
         val recent = sales.takeLast(3).reversed()
 
         if (recent.isEmpty()) {
@@ -428,7 +431,6 @@ fun SettingsScreen(sales: List<Sale>) {
     ) {
         Text("Настройки", fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
-        // === Планы ===
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
@@ -479,7 +481,6 @@ fun SettingsScreen(sales: List<Sale>) {
             }
         }
 
-        // === Информация ===
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
