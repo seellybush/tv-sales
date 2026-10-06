@@ -146,8 +146,8 @@ fun ScanScreen(
 ) {
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
-    var suggestions by remember { mutableStateOf(listOf<OnlinerProductSummary>()) }
-    var selectedProduct by remember { mutableStateOf<OnlinerProductSummary?>(null) }
+    var suggestions by remember { mutableStateOf(listOf<ProductSummary>()) }
+    var selectedProduct by remember { mutableStateOf<ProductSummary?>(null) }
     var message by remember { mutableStateOf("Введите модель телевизора") }
     var loading by remember { mutableStateOf(false) }
 
