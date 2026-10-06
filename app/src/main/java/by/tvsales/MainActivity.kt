@@ -146,8 +146,8 @@ fun ScanScreen(
 ) {
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
-    var suggestions by remember { mutableStateOf(listOf<ProductSummary>()) }
-    var selectedProduct by remember { mutableStateOf<ProductSummary?>(null) }
+    var suggestions by remember { mutableStateOf(listOf<FiveElementProduct>()) }
+    var selectedProduct by remember { mutableStateOf<FiveElementProduct?>(null) }
     var message by remember { mutableStateOf("Введите модель телевизора") }
     var loading by remember { mutableStateOf(false) }
 
@@ -155,7 +155,7 @@ fun ScanScreen(
     LaunchedEffect(query) {
         if (query.length >= 3) {
             delay(600)
-            suggestions = PriceRepository.searchModels(query)
+            suggestions = PriceRepository.searchTVs(query)
         } else {
             suggestions = emptyList()
         }
@@ -238,7 +238,7 @@ fun ScanScreen(
                     keyboardActions = KeyboardActions(
                         onSearch = {
                             scope.launch {
-                                suggestions = PriceRepository.searchModels(query)
+                                suggestions = PriceRepository.searchTVs(query)
                             }
                         }
                     ),
@@ -280,7 +280,7 @@ fun ScanScreen(
                                         fontWeight = FontWeight.Medium,
                                         fontSize = 14.sp
                                     )
-                                    product.price_min?.amount?.let {
+                                    product.price?.let {
                                         Text(
                                             "от $it BYN",
                                             color = LightLazuritePrimary,
@@ -317,7 +317,7 @@ fun ScanScreen(
                 loading = true
                 message = "Парсинг цены в 5 элементе..."
                 scope.launch {
-                    val result = PriceRepository.findPriceIn5Element(product.key)
+                    val result = PriceRepository.findPriceIn5Element(product.id)
                     if (result != null) {
                         onSaleAdded(Sale(product.name, result.first, currentEmployee))
                         message = "Добавлено: ${result.first} BYN на $currentEmployee (${result.second})"
