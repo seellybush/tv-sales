@@ -86,6 +86,7 @@ fun App() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun Scan(save: (Sale) -> Unit) {
     val scope = rememberCoroutineScope()
