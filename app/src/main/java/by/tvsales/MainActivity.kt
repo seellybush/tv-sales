@@ -317,15 +317,15 @@ fun ScanScreen(
                 loading = true
                 message = "Парсинг цены в 5 элементе..."
                 scope.launch {
-                    val result = PriceRepository.findPriceIn5Element(product.id)
-                    if (result != null) {
-                        onSaleAdded(Sale(product.name, result.first, currentEmployee))
-                        message = "Добавлено: ${result.first} BYN на $currentEmployee (${result.second})"
-                        query = ""
-                        selectedProduct = null
-                    } else {
-                        message = "5 элемент не торгует этой моделью"
-                    }
+                    val result = PriceRepository.findPrice(product.name)
+if (result != null) {
+    onSaleAdded(Sale(product.name, result.first, currentEmployee))
+    message = "Добавлено: ${result.first} BYN на $currentEmployee (${result.second})"
+    query = ""
+    selectedProduct = null
+} else {
+    message = "Модель не найдена на 5element.by"
+}
                     loading = false
                 }
             },
