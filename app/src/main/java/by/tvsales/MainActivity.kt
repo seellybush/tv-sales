@@ -340,7 +340,7 @@ fun ScanScreen(
             } else {
                 Icon(Icons.Default.Search, null)
                 Spacer(Modifier.width(8.dp))
-                Text("Спарсить и добавить", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text("Добавить", fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
         }
 
