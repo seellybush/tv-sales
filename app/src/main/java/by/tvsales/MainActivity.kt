@@ -1,5 +1,8 @@
 package by.tvsales
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -37,6 +40,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
@@ -77,6 +83,15 @@ data class EmployeePlan(
 )
 
 val employees = listOf("Егор", "Максим", "Вова")
+
+fun Context.findActivity(): Activity? {
+    var context = this
+    while (context is ContextWrapper) {
+        if (context is Activity) return context
+        context = context.baseContext
+    }
+    return null
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(b: Bundle?) {
@@ -121,19 +136,39 @@ fun App() {
             }
         },
         bottomBar = {
-            NavigationBar(containerColor = TvStatsCard, tonalElevation = 8.dp) {
-                listOf(
-                    Triple("Парсер", Icons.Default.Search, 0),
-                    Triple("Продажи", Icons.Default.List, 1),
-                    Triple("Настройки", Icons.Default.Settings, 2)
-                ).forEach { (label, icon, index) ->
-                    NavigationBarItem(
-                        selected = tab == index,
-                        onClick = { tab = index },
-                        icon = { Icon(icon, label, tint = if (tab == index) TvStatsPrimary else TvStatsTextSecondary) },
-                        label = { Text(label, color = if (tab == index) TvStatsPrimary else TvStatsTextSecondary) },
-                        colors = NavigationBarItemDefaults.colors(indicatorColor = TvStatsPrimary.copy(alpha = 0.1f))
-                    )
+            NavigationBar(
+                containerColor = TvStatsCard,
+                tonalElevation = 8.dp,
+                modifier = Modifier.fillMaxWidth(),
+                windowInsets = WindowInsets(0, 0, 0, 0)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    listOf(
+                        Triple("Парсер", Icons.Default.Search, 0),
+                        Triple("Продажи", Icons.Default.List, 1),
+                        Triple("Настройки", Icons.Default.Settings, 2)
+                    ).forEach { (label, icon, index) ->
+                        NavigationBarItem(
+                            selected = tab == index,
+                            onClick = { tab = index },
+                            icon = {
+                                Icon(icon, label,
+                                    tint = if (tab == index) TvStatsPrimary else TvStatsTextSecondary)
+                            },
+                            label = {
+                                Text(label, fontSize = 11.sp,
+                                    color = if (tab == index) TvStatsPrimary else TvStatsTextSecondary)
+                            },
+                            modifier = Modifier.width(100.dp),
+                            colors = NavigationBarItemDefaults.colors(
+                                indicatorColor = TvStatsPrimary.copy(alpha = 0.1f)
+                            )
+                        )
+                    }
                 }
             }
         },
@@ -142,7 +177,11 @@ fun App() {
         Box(Modifier.padding(p)) {
             when (tab) {
                 0 -> ScanScreen(currentEmployee, { currentEmployee = it }, { sales = sales + it; tab = 1 })
-                1 -> SalesScreen(sales, { sale -> sales = sales - sale }, { old, new -> sales = sales.map { if (it == old) new else it } })
+                1 -> SalesScreen(
+                    sales = sales,
+                    onDelete = { sale -> sales = sales - sale },
+                    onUpdate = { old, new -> sales = sales.map { if (it == old) new else it } }
+                )
                 2 -> SettingsScreen(sales, plans, { newPlans -> plans = newPlans })
             }
         }
@@ -351,6 +390,7 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
 @Composable
 fun SalesScreen(sales: List<Sale>, onDelete: (Sale) -> Unit, onUpdate: (Sale, Sale) -> Unit) {
     var selectedSale by remember { mutableStateOf<Sale?>(null) }
+    var employeeDialogSale by remember { mutableStateOf<Sale?>(null) }
 
     Column(Modifier.padding(16.dp)) {
         Text("Статистика продаж", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TvStatsText)
@@ -374,8 +414,18 @@ fun SalesScreen(sales: List<Sale>, onDelete: (Sale) -> Unit, onUpdate: (Sale, Sa
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text(sale.model, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = TvStatsText)
-                                    Text("ТВ: ${moneyFormat.format(sale.price)} BYN · ${sale.employee}",
-                                        fontSize = 13.sp, color = TvStatsPrimary, fontWeight = FontWeight.Bold)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("ТВ: ${moneyFormat.format(sale.price)} BYN · ",
+                                            fontSize = 13.sp, color = TvStatsPrimary, fontWeight = FontWeight.Bold)
+                                        // Имя продавца — кликабельно
+                                        Text(
+                                            sale.employee,
+                                            fontSize = 13.sp,
+                                            color = TvStatsPrimary,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.clickable { employeeDialogSale = sale }
+                                        )
+                                    }
                                 }
                                 IconButton(onClick = { onDelete(sale) }) {
                                     Icon(Icons.Default.Delete, "Удалить", tint = TvStatsRed)
@@ -423,6 +473,43 @@ fun SalesScreen(sales: List<Sale>, onDelete: (Sale) -> Unit, onUpdate: (Sale, Sa
         }
     }
 
+    // Выбор продавца
+    employeeDialogSale?.let { sale ->
+        AlertDialog(
+            onDismissRequest = { employeeDialogSale = null },
+            title = { Text("Кто продал: ${sale.model}", fontSize = 15.sp, color = TvStatsText) },
+            text = {
+                Column {
+                    employees.forEach { name ->
+                        Card(
+                            Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
+                                onUpdate(sale, sale.copy(employee = name))
+                                employeeDialogSale = null
+                            },
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (name == sale.employee) TvStatsPrimary.copy(alpha = 0.15f) else TvStatsBg
+                            )
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (name == sale.employee) {
+                                    Icon(Icons.Default.Check, null, tint = TvStatsPrimary, modifier = Modifier.size(20.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                }
+                                Text(name, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = TvStatsText)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { employeeDialogSale = null }) { Text("Отмена") }
+            }
+        )
+    }
+
     selectedSale?.let { sale ->
         AccessoryPanel(sale, { selectedSale = null }, { updated -> onUpdate(sale, updated); selectedSale = null })
     }
@@ -432,6 +519,7 @@ fun SalesScreen(sales: List<Sale>, onDelete: (Sale) -> Unit, onUpdate: (Sale, Sa
 @Composable
 fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val accessories = remember { mutableStateListOf<AccessoryItem>().apply { addAll(sale.accessories) } }
@@ -454,10 +542,20 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
     fun hideKeyboardNow() {
         keyboard?.hide()
         focusManager.clearFocus(force = true)
+        val activity = context.findActivity()
+        if (activity != null) {
+            val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+            controller.hide(WindowInsetsCompat.Type.ime())
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
         scope.launch {
-            delay(50)
+            delay(100)
             keyboard?.hide()
             focusManager.clearFocus(force = true)
+            if (activity != null) {
+                val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+                controller.hide(WindowInsetsCompat.Type.ime())
+            }
         }
     }
 
@@ -522,7 +620,6 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 }
 
-                // Гарантия
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.VerifiedUser, null, tint = TvStatsPrimary, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(6.dp))
@@ -564,7 +661,6 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
-                // Поиск аксессуаров
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Build, null, tint = TvStatsPrimary, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(6.dp))
@@ -623,6 +719,10 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                         accessories.add(AccessoryItem(prod.name, prod.price))
                         searchResults = emptyList(); searchQuery = ""
                         hideKeyboardNow()
+                        scope.launch {
+                            delay(200)
+                            hideKeyboardNow()
+                        }
                     }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(8.dp)) {
                             Icon(
@@ -641,7 +741,6 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
-                // Подписки
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Subscriptions, null, tint = TvStatsPrimary, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(6.dp))
@@ -786,7 +885,7 @@ fun SettingsScreen(
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
-                Text("Версия: 1.15.0", fontSize = 14.sp, color = TvStatsTextSecondary)
+                Text("Версия: 1.16.0", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Разработчик: Матранг", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Источник: 5element.by", fontSize = 14.sp, color = TvStatsTextSecondary)
