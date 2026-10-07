@@ -21,6 +21,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -31,7 +32,6 @@ import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.util.Locale
 
-// --- Цветовая палитра "Светлый лазурит" ---
 val LightLazuriteBg = Color(0xFFF4F7FC)
 val LightLazuriteCard = Color(0xFFFFFFFF)
 val LightLazuritePrimary = Color(0xFF3A86FF)
@@ -40,7 +40,15 @@ val LightLazuriteTextSecondary = Color(0xFF6E6E6E)
 val LightLazuriteAccentGreen = Color(0xFF2ECC71)
 val LightLazuriteAccentRed = Color(0xFFE74C3C)
 
-data class Sale(val model: String, val price: Double, val employee: String)
+data class Sale(
+    val model: String,
+    val price: Double,
+    val employee: String,
+    val accessories: List<AccessoryItem> = emptyList(),
+    val services: List<ServiceItem> = emptyList()
+) {
+    val total: Double get() = price + accessories.sumOf { it.price } + services.sumOf { it.price }
+}
 
 val employees = listOf("Егор", "Максим", "Вова")
 val money: NumberFormat = NumberFormat.getCurrencyInstance(Locale("be", "BY"))
@@ -80,7 +88,7 @@ fun App() {
                     .padding(vertical = 16.dp, horizontal = 20.dp)
             ) {
                 Text(
-                    text = "ПАРСЕР ЖОРИЧА",
+                    "ПАРСЕР ЖОРИЧА",
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
@@ -100,16 +108,12 @@ fun App() {
                         selected = tab == index,
                         onClick = { tab = index },
                         icon = {
-                            Icon(
-                                icon, contentDescription = label,
-                                tint = if (tab == index) LightLazuritePrimary else LightLazuriteTextSecondary
-                            )
+                            Icon(icon, label,
+                                tint = if (tab == index) LightLazuritePrimary else LightLazuriteTextSecondary)
                         },
                         label = {
-                            Text(
-                                label,
-                                color = if (tab == index) LightLazuritePrimary else LightLazuriteTextSecondary
-                            )
+                            Text(label,
+                                color = if (tab == index) LightLazuritePrimary else LightLazuriteTextSecondary)
                         },
                         colors = NavigationBarItemDefaults.colors(
                             indicatorColor = LightLazuritePrimary.copy(alpha = 0.1f)
@@ -129,7 +133,8 @@ fun App() {
                 )
                 1 -> SalesScreen(
                     sales = sales,
-                    onDelete = { saleToRemove -> sales = sales - saleToRemove }
+                    onDelete = { sale -> sales = sales - sale },
+                    onUpdate = { old, new -> sales = sales.map { if (it == old) new else it } }
                 )
                 2 -> SettingsScreen(sales)
             }
@@ -145,13 +150,13 @@ fun ScanScreen(
     onSaleAdded: (Sale) -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    val keyboard = LocalSoftwareKeyboardController.current
     var query by remember { mutableStateOf("") }
     var suggestions by remember { mutableStateOf(listOf<FiveElementProduct>()) }
     var selectedProduct by remember { mutableStateOf<FiveElementProduct?>(null) }
     var message by remember { mutableStateOf("Введите модель телевизора") }
     var loading by remember { mutableStateOf(false) }
 
-    // Автопоиск с задержкой (когда пользователь перестал печатать)
     LaunchedEffect(query) {
         if (query.length >= 3) {
             delay(600)
@@ -162,12 +167,12 @@ fun ScanScreen(
     }
 
     Column(
-        modifier = Modifier
+        Modifier
             .fillMaxSize()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // === 1. ВЫБОР СОТРУДНИКА ===
+        // === 1. Выбор сотрудника ===
         var empExpanded by remember { mutableStateOf(false) }
         Card(
             shape = RoundedCornerShape(16.dp),
@@ -178,33 +183,20 @@ fun ScanScreen(
             Column(Modifier.padding(16.dp)) {
                 Text("Кто продаёт?", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Spacer(Modifier.height(8.dp))
-                ExposedDropdownMenuBox(
-                    expanded = empExpanded,
-                    onExpandedChange = { empExpanded = !empExpanded }
-                ) {
+                ExposedDropdownMenuBox(empExpanded, { empExpanded = !empExpanded }) {
                     OutlinedTextField(
                         value = currentEmployee,
                         onValueChange = {},
                         readOnly = true,
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(empExpanded)
-                        },
-                        modifier = Modifier
-                            .menuAnchor()
-                            .fillMaxWidth(),
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(empExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp)
                     )
-                    ExposedDropdownMenu(
-                        expanded = empExpanded,
-                        onDismissRequest = { empExpanded = false }
-                    ) {
+                    ExposedDropdownMenu(empExpanded, { empExpanded = false }) {
                         employees.forEach { name ->
                             DropdownMenuItem(
                                 text = { Text(name) },
-                                onClick = {
-                                    onEmployeeChange(name)
-                                    empExpanded = false
-                                }
+                                onClick = { onEmployeeChange(name); empExpanded = false }
                             )
                         }
                     }
@@ -212,7 +204,7 @@ fun ScanScreen(
             }
         }
 
-        // === 2. ПОИСК МОДЕЛИ ===
+        // === 2. Поиск модели ===
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
@@ -230,13 +222,14 @@ fun ScanScreen(
                         selectedProduct = null
                         message = "Введите модель..."
                     },
-                    label = { Text("Например: Samsung UE55") },
+                    label = { Text("Например: 55QLED780K") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(
                         onSearch = {
+                            keyboard?.hide()  // ← скрываем клавиатуру
                             scope.launch {
                                 suggestions = PriceRepository.searchTVs(query)
                             }
@@ -254,42 +247,41 @@ fun ScanScreen(
                     }
                 )
 
-                AnimatedVisibility(visible = suggestions.isNotEmpty() && selectedProduct == null) {
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(max = 250.dp)
-            .padding(top = 8.dp)
-    ) {
-        items(suggestions.size) { index ->
-            val product = suggestions[index]
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp)
-                    .clickable {
-                        selectedProduct = product
-                        query = product.name
-                        suggestions = emptyList()
-                        message = "Выбрано: ${product.name}"
-                    },
-                colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    Text(product.name, fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                    product.price?.let {
-                        Text("от $it BYN", color = LightLazuritePrimary, fontSize = 12.sp)
+                AnimatedVisibility(suggestions.isNotEmpty() && selectedProduct == null) {
+                    LazyColumn(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 250.dp)
+                            .padding(top = 8.dp)
+                    ) {
+                        items(suggestions.size) { index ->
+                            val product = suggestions[index]
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                                    .clickable {
+                                        keyboard?.hide()  // ← скрываем клавиатуру при выборе
+                                        selectedProduct = product
+                                        query = product.name
+                                        suggestions = emptyList()
+                                        message = "Выбрано: ${product.name}"
+                                    },
+                                colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)
+                            ) {
+                                Column(Modifier.padding(12.dp)) {
+                                    Text(product.name, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                                    Text("${product.price} BYN", color = LightLazuritePrimary, fontSize = 12.sp)
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
-    }
-}
-            }
-        }
 
-        // === 3. ВЫБРАННЫЙ ТОВАР ===
-        if (selectedProduct != null) {
+        // === 3. Выбранный товар ===
+        selectedProduct?.let { sp ->
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
@@ -297,48 +289,36 @@ fun ScanScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("Выбрано", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = LightLazuriteTextSecondary)
-                    Text(selectedProduct!!.name, fontWeight = FontWeight.Medium, fontSize = 16.sp)
+                    Text("Выбрано", fontWeight = FontWeight.Bold, fontSize = 14.sp,
+                        color = LightLazuriteTextSecondary)
+                    Text(sp.name, fontWeight = FontWeight.Medium, fontSize = 16.sp)
+                    Text("${sp.price} BYN", color = LightLazuritePrimary, fontWeight = FontWeight.Bold)
                 }
             }
         }
 
-        // === 4. КНОПКА ПАРСИНГА ===
+        // === 4. Кнопка добавления ===
         Button(
             onClick = {
                 val product = selectedProduct ?: return@Button
-                loading = true
-                message = "Парсинг цены в 5 элементе..."
-                scope.launch {
-                    val result = PriceRepository.findPrice(product.name)
-if (result != null) {
-    onSaleAdded(Sale(product.name, result.first, currentEmployee))
-    message = "Добавлено: ${result.first} BYN на $currentEmployee (${result.second})"
-    query = ""
-    selectedProduct = null
-} else {
-    message = "Модель не найдена на 5element.by"
-}
-                    loading = false
-                }
+                onSaleAdded(Sale(product.name, product.price, currentEmployee))
+                message = "Добавлено: ${product.name} · ${product.price} BYN"
+                query = ""
+                selectedProduct = null
             },
-            enabled = selectedProduct != null && !loading,
+            enabled = selectedProduct != null,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp),
             shape = RoundedCornerShape(12.dp)
         ) {
-            if (loading) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White)
-            } else {
-                Icon(Icons.Default.Search, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Добавить", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            }
+            Icon(Icons.Default.Add, null)
+            Spacer(Modifier.width(8.dp))
+            Text("Добавить", fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
 
         Text(
-            text = message,
+            message,
             fontSize = 14.sp,
             color = LightLazuriteTextSecondary,
             modifier = Modifier.fillMaxWidth(),
@@ -348,58 +328,63 @@ if (result != null) {
 }
 
 @Composable
-fun SalesScreen(sales: List<Sale>, onDelete: (Sale) -> Unit) {
+fun SalesScreen(
+    sales: List<Sale>,
+    onDelete: (Sale) -> Unit,
+    onUpdate: (Sale, Sale) -> Unit
+) {
+    var selectedSale by remember { mutableStateOf<Sale?>(null) }
+
     Column(Modifier.padding(16.dp)) {
         Text("Статистика продаж", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-
         Spacer(Modifier.height(4.dp))
         Text(
-            "Всего: ${"%.2f".format(sales.sumOf { it.price })} BYN",
+            "Всего: ${"%.2f".format(sales.sumOf { it.total })} BYN",
             fontSize = 18.sp,
             color = LightLazuritePrimary,
             fontWeight = FontWeight.Bold
         )
 
         Spacer(Modifier.height(16.dp))
-        Text("Последние продажи", fontSize = 16.sp, fontWeight = FontWeight.Medium)
+        Text("Последние продажи (нажми на ТВ, чтобы добавить акс/сервис)",
+            fontSize = 13.sp, color = LightLazuriteTextSecondary)
         Spacer(Modifier.height(8.dp))
 
-        val recent = sales.takeLast(3).reversed()
+        val recent = sales.takeLast(5).reversed()
 
         if (recent.isEmpty()) {
-            Text(
-                "Пока нет продаж",
-                color = LightLazuriteTextSecondary,
-                modifier = Modifier.padding(vertical = 16.dp)
-            )
+            Text("Пока нет продаж", color = LightLazuriteTextSecondary,
+                modifier = Modifier.padding(vertical = 16.dp))
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(recent) { sale ->
                     Card(
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
-                        elevation = CardDefaults.cardElevation(1.dp)
+                        elevation = CardDefaults.cardElevation(1.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectedSale = sale }
                     ) {
                         Row(
-                            modifier = Modifier
+                            Modifier
                                 .fillMaxWidth()
                                 .padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(Modifier.weight(1f)) {
                                 Text(sale.model, fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                                Text(
-                                    "${sale.price} BYN · ${sale.employee}",
-                                    fontSize = 12.sp,
-                                    color = LightLazuriteTextSecondary
-                                )
+                                Text("${sale.total} BYN · ${sale.employee}",
+                                    fontSize = 12.sp, color = LightLazuriteTextSecondary)
+                                if (sale.accessories.isNotEmpty() || sale.services.isNotEmpty()) {
+                                    Text(
+                                        "+ акс: ${sale.accessories.size} · сервис: ${sale.services.size}",
+                                        fontSize = 11.sp, color = LightLazuriteAccentGreen
+                                    )
+                                }
                             }
                             IconButton(onClick = { onDelete(sale) }) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = "Удалить",
-                                    tint = LightLazuriteAccentRed
-                                )
+                                Icon(Icons.Default.Delete, "Удалить", tint = LightLazuriteAccentRed)
                             }
                         }
                     }
@@ -407,6 +392,166 @@ fun SalesScreen(sales: List<Sale>, onDelete: (Sale) -> Unit) {
             }
         }
     }
+
+    // Панель выбора аксессуаров и сервиса
+    selectedSale?.let { sale ->
+        AccessoryPanel(
+            sale = sale,
+            onDismiss = { selectedSale = null },
+            onSave = { updated ->
+                onUpdate(sale, updated)
+                selectedSale = null
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AccessoryPanel(
+    sale: Sale,
+    onDismiss: () -> Unit,
+    onSave: (Sale) -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val accessories = remember { mutableStateListOf<AccessoryItem>().apply { addAll(sale.accessories) } }
+    val services = remember { mutableStateListOf<ServiceItem>().apply { addAll(sale.services) } }
+
+    var searchQuery by remember { mutableStateOf("") }
+    var searchResults by remember { mutableStateOf(listOf<FiveElementProduct>()) }
+    var searching by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Акс и сервис для ${sale.model}", fontSize = 16.sp) },
+        text = {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 500.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // === Аксессуары (поиск) ===
+                Text("Аксессуары", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        label = { Text("Звуковая панель, кронштейн...") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            searching = true
+                            scope.launch {
+                                searchResults = PriceRepository.searchAccessories(searchQuery)
+                                searching = false
+                            }
+                        },
+                        enabled = searchQuery.length >= 3 && !searching
+                    ) { Text("Найти") }
+                }
+                if (searching) {
+                    CircularProgressIndicator(Modifier.size(24.dp))
+                }
+                searchResults.forEach { prod ->
+                    Card(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                accessories.add(AccessoryItem(prod.name, prod.price))
+                                searchResults = emptyList()
+                                searchQuery = ""
+                            },
+                        colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)
+                    ) {
+                        Column(Modifier.padding(8.dp)) {
+                            Text(prod.name, fontSize = 13.sp)
+                            Text("${prod.price} BYN", color = LightLazuritePrimary, fontSize = 12.sp)
+                        }
+                    }
+                }
+                // Уже добавленные аксессуары
+                accessories.forEachIndexed { i, acc ->
+                    Card(colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("${acc.name} · ${acc.price} BYN",
+                                Modifier.weight(1f), fontSize = 13.sp)
+                            IconButton(onClick = { accessories.removeAt(i) }) {
+                                Icon(Icons.Default.Close, "Удалить", tint = LightLazuriteAccentRed)
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+
+                // === Доп. сервис (фиксированный список) ===
+                Text("Доп. сервис", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+
+                Text("Видеосервисы:", fontSize = 13.sp, color = LightLazuriteTextSecondary)
+                videoServices.forEach { svc ->
+                    Card(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                if (services.none { it.name == svc.name }) {
+                                    services.add(svc)
+                                }
+                            },
+                        colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)
+                    ) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(svc.name, Modifier.weight(1f), fontSize = 13.sp)
+                            Text("${svc.price} BYN", color = LightLazuritePrimary, fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                // Уже добавленные сервисы
+                services.forEachIndexed { i, svc ->
+                    Card(colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("${svc.name} · ${svc.price} BYN",
+                                Modifier.weight(1f), fontSize = 13.sp)
+                            IconButton(onClick = { services.removeAt(i) }) {
+                                Icon(Icons.Default.Close, "Удалить", tint = LightLazuriteAccentRed)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                onSave(sale.copy(
+                    accessories = accessories.toList(),
+                    services = services.toList()
+                ))
+            }) { Text("Сохранить") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
 }
 
 @Composable
@@ -416,7 +561,7 @@ fun SettingsScreen(sales: List<Sale>) {
     }
 
     Column(
-        modifier = Modifier
+        Modifier
             .fillMaxSize()
             .padding(16.dp)
             .verticalScroll(rememberScrollState()),
@@ -434,12 +579,11 @@ fun SettingsScreen(sales: List<Sale>) {
                 Text("Планы на месяц", fontWeight = FontWeight.Bold, fontSize = 16.sp)
 
                 employees.forEach { name ->
-                    val fact = sales.filter { it.employee == name }.sumOf { it.price }
+                    val fact = sales.filter { it.employee == name }.sumOf { it.total }
                     var input by remember { mutableStateOf((plans[name] ?: 0.0).toString()) }
 
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(name, fontWeight = FontWeight.Medium, fontSize = 15.sp)
-
                         OutlinedTextField(
                             value = input,
                             onValueChange = { input = it },
@@ -447,27 +591,19 @@ fun SettingsScreen(sales: List<Sale>) {
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(8.dp)
                         )
-
                         val percent = if ((plans[name] ?: 0.0) > 0)
                             (fact / (plans[name] ?: 1.0) * 100) else 0.0
-
                         Text("Факт: $fact BYN", fontSize = 13.sp)
                         Text(
                             "Выполнение: ${"%.1f".format(percent)}%",
                             color = if (percent >= 100) LightLazuriteAccentGreen else LightLazuritePrimary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
+                            fontWeight = FontWeight.Bold, fontSize = 13.sp
                         )
-
                         Button(
-                            onClick = {
-                                input.toDoubleOrNull()?.let { plans = plans + (name to it) }
-                            },
+                            onClick = { input.toDoubleOrNull()?.let { plans = plans + (name to it) } },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Сохранить план")
-                        }
+                        ) { Text("Сохранить план") }
                         HorizontalDivider(Modifier.padding(vertical = 4.dp))
                     }
                 }
@@ -482,9 +618,9 @@ fun SettingsScreen(sales: List<Sale>) {
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                Text("Версия: 0.4.0", fontSize = 14.sp)
+                Text("Версия: 0.5.0", fontSize = 14.sp)
                 Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp)
-                Text("Источник цен: Onliner (5 элемент)", fontSize = 14.sp)
+                Text("Источник: 5element.by (Diginetica)", fontSize = 14.sp)
             }
         }
     }
