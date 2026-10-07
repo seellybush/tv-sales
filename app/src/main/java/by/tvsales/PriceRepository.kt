@@ -1,8 +1,6 @@
 package by.tvsales
 
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -41,8 +39,7 @@ data class FiveElementProduct(
     val price: Double = 0.0,
     val oldPrice: Double? = null,
     val diagonal: String = "",
-    val url: String = "",
-    val vesa: String = ""
+    val url: String = ""
 )
 
 data class AccessoryItem(val name: String, val price: Double)
@@ -170,12 +167,7 @@ object PriceRepository {
         }
     }
 
-    // 🔧 Поиск кронштейнов с фильтром по цене и логированием
-    suspend fun searchBrackets(
-        query: String,
-        priceFrom: Int? = null,
-        priceTo: Int? = null
-    ): List<FiveElementProduct> = withContext(Dispatchers.IO) {
+    suspend fun searchBrackets(query: String): List<FiveElementProduct> = withContext(Dispatchers.IO) {
         if (query.length < 2) return@withContext emptyList()
         try {
             val encoded = URLEncoder.encode(query, "UTF-8")
@@ -198,7 +190,7 @@ object PriceRepository {
             val body = resp.body?.string() ?: return@withContext emptyList()
             val parsed = json.decodeFromString<DigineticaResponse>(body)
 
-            val allBrackets = parsed.products
+            parsed.products
                 .filter { product ->
                     product.name.contains("кронштейн", ignoreCase = true) ||
                     product.name.contains("крепление", ignoreCase = true)
@@ -214,60 +206,10 @@ object PriceRepository {
                     )
                 }
                 .filter { it.price > 5 }
-
-            // Отладка
-            println("BRACKETS_RAW count=${allBrackets.size}")
-            allBrackets.take(10).forEach { println("  ${it.name.take(40)} = ${it.price}") }
-            println("FILTER from=$priceFrom to=$priceTo")
-
-            var result = allBrackets
-            if (priceFrom != null && priceFrom > 0) result = result.filter { it.price >= priceFrom }
-            if (priceTo != null && priceTo > 0) result = result.filter { it.price <= priceTo }
-
-            println("BRACKETS_FILTERED count=${result.size}")
-            result
         } catch (e: Exception) {
             e.printStackTrace()
             emptyList()
         }
-    }
-
-    suspend fun fetchVesa(productUrl: String): String = withContext(Dispatchers.IO) {
-        if (productUrl.isEmpty()) return@withContext ""
-        try {
-            val req = Request.Builder().url(productUrl)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                .header("Accept", "text/html,application/xhtml+xml")
-                .header("Accept-Language", "ru-RU,ru;q=0.9")
-                .build()
-
-            val resp = client.newCall(req).execute()
-            if (!resp.isSuccessful) return@withContext ""
-            val html = resp.body?.string() ?: return@withContext ""
-
-            val pattern = Pattern.compile(
-                "(?:Крепление\\s+VESA|Совместимость\\s+с\\s+креплением\\s+VESA)\\s*[|:]?\\s*([^<\\n]+)",
-                Pattern.CASE_INSENSITIVE
-            )
-            val matcher = pattern.matcher(html)
-            if (matcher.find()) {
-                matcher.group(1)?.trim()?.replace("&nbsp;", " ") ?: ""
-            } else ""
-        } catch (e: Exception) {
-            e.printStackTrace()
-            ""
-        }
-    }
-
-    suspend fun enrichBracketsWithVesa(
-        products: List<FiveElementProduct>
-    ): List<FiveElementProduct> = withContext(Dispatchers.IO) {
-        products.map { product ->
-            async {
-                val vesa = fetchVesa(product.url)
-                product.copy(vesa = vesa)
-            }
-        }.awaitAll()
     }
 
     suspend fun fetchWarrantyByUrl(productUrl: String): List<WarrantyOption> = withContext(Dispatchers.IO) {
