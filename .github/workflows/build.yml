@@ -3,6 +3,7 @@ name: Build TV Sales APK
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   workflow_dispatch:
 
 jobs:
@@ -22,9 +23,8 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
       with:
-        packages: ''   # <-- ВОТ ЭТО ГЛАВНОЕ. Пустая строка = ничего лишнего не ставить
+        packages: ''
 
-    # Этот шаг вручную устанавливает Gradle 8.9, чтобы точно совпало с AGP 8.5.2
     - name: Setup Gradle 8.9
       uses: gradle/actions/setup-gradle@v4
       with:
@@ -33,8 +33,15 @@ jobs:
     - name: Build Debug APK
       run: gradle assembleDebug
 
-    - name: Upload APK
+    - name: Upload APK as artifact
       uses: actions/upload-artifact@v4
       with:
         name: tv-sales-debug-apk
         path: app/build/outputs/apk/debug/*.apk
+
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: app/build/outputs/apk/debug/app-debug.apk
+        generate_release_notes: true
