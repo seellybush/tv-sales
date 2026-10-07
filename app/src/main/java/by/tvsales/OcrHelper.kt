@@ -22,6 +22,16 @@ object OcrHelper {
         "JVC", "THOMSON", "KIVI", "BQ", "ЯНДЕКС", "YANDEX", "POLAR"
     )
 
+    // Слова, которые НЕ должны быть внутри слова-модели
+    private val noiseSubstrings = listOf(
+        "CARTON", "VOLTAGE", "WEIGHT", "GROSS", "DIMENSIONS",
+        "S/N", "S/NO", "SERIAL", "W/O", "DATE", "MODEL", "МОДЕЛЬ",
+        "ТУ BY", "TYBY", "ТУBY", "EAC", "HDMI", "USB", "WEBOS", "TIZEN",
+        "ANDROID", "GOOGLE", "SMART", "SERIES", "TEL", "КОД",
+        "ЭЛЕКТРОНИКС", "МИНСК", "РОССИ", "БЕЛАРУ", "СДЕЛАНО",
+        "ИЗГОТОВИТЕЛЬ", "ИМПОРТЕР", "ПРОИЗВОДИТЕЛЬ"
+    )
+
     suspend fun recognizeText(context: Context, imageUri: Uri): String =
         suspendCancellableCoroutine { continuation ->
             try {
@@ -36,18 +46,12 @@ object OcrHelper {
         }
 
     fun extractModel(text: String): String {
-        val rawLines = text.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
-
-        val noiseWords = listOf(
-            "CARTON", "NO:", "VOLTAGE", "WEIGHT", "NET", "GROSS",
-            "DIMENSIONS", "S/N", "S/NO", "SERIAL", "W/O", "DATE",
-            "ТУ BY", "TYBY", "ТУBY", "ИЗГОТОВИТЕЛЬ", "ИМПОРТЕР", "СДЕЛАНО",
-            "АДРЕС", "НАПРЯЖЕНИЕ", "ПИТАНИЕ", "ГАРАНТИЙНЫЙ", "СЕРВИСНЫЙ",
-            "ТЕЛЕВИЗОР", "ТЕЛЕДИДАР", "EAC", "HDMI", "USB", "WEBOS", "TIZEN",
-            "ANDROID", "GOOGLE", "SMART", "SERIES", "MODEL", "МОДЕЛЬ",
-            "КГ", "ММ", "ВТ", "HZ", "PIX", "ПИКС", "LED", "QLED", "ULED",
-            "HQLED", "NANOCELL", "OLED", "MINILED", "DIRECT", "FULL", "ULTRA"
-        )
+        // Разбиваем на слова
+        val allWords = mutableListOf<String>()
+        for (line in text.split("\n")) {
+            val cleaned = line.replace(":", " ").replace("|", " ").replace(",", " ")
+            allWords.addAll(cleaned.split(Regex("\\s+")).filter { it.isNotBlank() })
+        }
 
         fun isSerial(s: String): Boolean {
             val u = s.uppercase().replace(" ", "")
@@ -55,6 +59,11 @@ object OcrHelper {
             if (u.startsWith("TY") || u.startsWith("ТУ")) return true
             if (u.length >= 15 && u.count { it.isDigit() } >= 6) return true
             return false
+        }
+
+        fun containsNoise(s: String): Boolean {
+            val u = s.uppercase()
+            return noiseSubstrings.any { u.contains(it) }
         }
 
         fun isCleanModel(s: String): Boolean {
@@ -75,18 +84,13 @@ object OcrHelper {
 
         fun fixOcr(s: String): String {
             var r = s.uppercase().replace(" ", "").substringBefore(".")
+            // 550NED → 55QNED (Q→0)
             val m = Regex("^(\\d{2})(0)([A-Z].*)$").find(r)
             if (m != null) r = m.groupValues[1] + "Q" + m.groupValues[3]
             return r
         }
 
-        // ❗ Разбиваем каждую строку на слова и ищем модель по каждому слову
-        val words = mutableListOf<String>()
-        for (line in rawLines) {
-            val cleaned = line.replace(":", " ").replace("|", " ").replace(",", " ")
-            words.addAll(cleaned.split(Regex("\\s+")).filter { it.isNotBlank() })
-        }
-
+        // Паттерн модели: диагональ + буквы/цифры
         val modelPattern = Regex(
             "(2[48]|3[29]|4[0238]|50|5[058]|60|65|70|75|77|83|85|98|100|115)([A-Z]{1,8}\\d{0,5}[A-Z0-9]{0,8})"
         )
@@ -94,12 +98,11 @@ object OcrHelper {
         data class Candidate(val value: String, val priority: Int)
         val candidates = mutableListOf<Candidate>()
 
-        for (word in words) {
-            val u = word.uppercase()
-            if (noiseWords.any { u.contains(it) }) continue
-            if (isSerial(u)) continue
+        for (word in allWords) {
+            if (containsNoise(word)) continue
+            if (isSerial(word)) continue
 
-            val fixed = fixOcr(u)
+            val fixed = fixOcr(word)
             val matches = modelPattern.findAll(fixed)
 
             for (m in matches) {
@@ -107,25 +110,30 @@ object OcrHelper {
                 if (!isCleanModel(c)) continue
 
                 var priority = 5
-                val indexInText = text.uppercase().indexOf(u)
-                val before = if (indexInText > 0) text.uppercase().substring(0, indexInText) else ""
-                val lastWordBefore = before.split(Regex("\\s+")).lastOrNull { it.isNotBlank() }?.uppercase() ?: ""
 
-                if (lastWordBefore.contains("QUANTUM")) priority = 1
-                else if (lastWordBefore == "MODEL" || lastWordBefore == "МОДЕЛЬ") priority = 1
-                else if (brands.any { lastWordBefore.contains(it) }) priority = 2
-                else if (u.contains("QUANTUM")) priority = 1
+                // Приоритет: слово сразу после MODEL/МОДЕЛЬ/Quantum/бренда
+                val textUpper = text.uppercase()
+                val wordPos = textUpper.indexOf(word.uppercase())
+                val before = if (wordPos > 0) textUpper.substring(0, wordPos) else ""
+                val lastBefore = before.split(Regex("\\s+")).lastOrNull { it.isNotBlank() }?.uppercase() ?: ""
+
+                if (lastBefore.contains("QUANTUM") || word.uppercase().contains("QUANTUM")) priority = 1
+                else if (lastBefore == "MODEL" || lastBefore == "МОДЕЛЬ") priority = 1
+                else if (brands.any { lastBefore.contains(it) }) priority = 2
+                else if (wordPos in 0..100) priority = 3
 
                 if (c.length in 5..10) priority -= 1
+
                 candidates.add(Candidate(c, priority))
             }
         }
 
-        return candidates.sortedWith(compareBy({ it.priority }, { it.value.length }))
+        return candidates
+            .sortedWith(compareBy({ it.priority }, { it.value.length }))
             .firstOrNull()?.value ?: ""
     }
 
-    // Варианты для поиска (OCR-ошибки + усечение последнего символа)
+    // Варианты для поиска (OCR-ошибки)
     fun generateSearchVariants(model: String): List<String> {
         val variants = mutableListOf(model)
         if (model.contains("8")) variants.add(model.replace("8", "B"))
