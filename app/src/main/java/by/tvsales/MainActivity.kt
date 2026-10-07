@@ -1,8 +1,12 @@
 package by.tvsales
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -24,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -149,17 +154,42 @@ fun App() {
 fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSaleAdded: (Sale) -> Unit) {
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
+    val context = LocalContext.current
     var query by remember { mutableStateOf("") }
     var suggestions by remember { mutableStateOf(listOf<FiveElementProduct>()) }
     var selectedProduct by remember { mutableStateOf<FiveElementProduct?>(null) }
     var message by remember { mutableStateOf("Введите модель телевизора") }
+    var scanning by remember { mutableStateOf(false) }
+
+    // Галерея — выбор фото
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch {
+                scanning = true
+                message = "Распознаю модель с фото..."
+                val text = OcrHelper.recognizeText(context, uri)
+                val model = OcrHelper.extractModel(text)
+                if (model.isNotEmpty()) {
+                    query = model
+                    selectedProduct = null
+                    suggestions = PriceRepository.searchTVs(model)
+                    message = "Распознано: $model"
+                } else {
+                    message = "Не удалось распознать модель. Введите вручную."
+                }
+                scanning = false
+            }
+        }
+    }
 
     LaunchedEffect(query) {
         if (query.length >= 3) { delay(600); suggestions = PriceRepository.searchTVs(query) } else suggestions = emptyList()
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        // === 1. МОДЕЛЬ ТЕЛЕВИЗОРА (теперь первым) ===
+        // === 1. МОДЕЛЬ ТЕЛЕВИЗОРА ===
         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
@@ -179,6 +209,32 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
                         }
                     }
                 )
+
+                Spacer(Modifier.height(8.dp))
+
+                // Кнопка сканирования модели с фото
+                Button(
+                    onClick = {
+                        galleryLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    },
+                    enabled = !scanning,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = TvStatsGreen),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    if (scanning) {
+                        CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Распознаю...")
+                    } else {
+                        Icon(Icons.Default.PhotoCamera, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Распознать модель с фото")
+                    }
+                }
+
                 AnimatedVisibility(suggestions.isNotEmpty() && selectedProduct == null) {
                     LazyColumn(Modifier.fillMaxWidth().heightIn(max = 250.dp).padding(top = 8.dp)) {
                         items(suggestions.size) { index ->
@@ -202,7 +258,7 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
             }
         }
 
-        // === 2. КТО ПРОДАЁТ (теперь вторым) ===
+        // === 2. КТО ПРОДАЁТ ===
         var empExpanded by remember { mutableStateOf(false) }
         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
@@ -594,7 +650,7 @@ fun SettingsScreen(
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
-                Text("Версия: 1.4.0", fontSize = 14.sp, color = TvStatsTextSecondary)
+                Text("Версия: 1.5.0", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Разработчик: Матранг", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Источник: 5element.by", fontSize = 14.sp, color = TvStatsTextSecondary)
