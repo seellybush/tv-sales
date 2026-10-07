@@ -36,7 +36,6 @@ import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.util.Locale
 
-// === Мягкая пастельная палитра «TV STATS» ===
 val TvStatsBg = Color(0xFFF0F4F8)
 val TvStatsCard = Color(0xFFFFFFFF)
 val TvStatsPrimary = Color(0xFF5B8DEF)
@@ -46,12 +45,10 @@ val TvStatsGreen = Color(0xFF10B981)
 val TvStatsRed = Color(0xFFEF4444)
 val TvStatsOrange = Color(0xFFF59E0B)
 
-// С копейками для отображения цен
 val moneyFormat: NumberFormat = NumberFormat.getNumberInstance(Locale("be", "BY")).apply {
     minimumFractionDigits = 2
     maximumFractionDigits = 2
 }
-// Целые для полей ввода плана
 val intFormat: NumberFormat = NumberFormat.getIntegerInstance(Locale("be", "BY"))
 
 data class Sale(
@@ -316,12 +313,15 @@ fun SalesScreen(sales: List<Sale>, onDelete: (Sale) -> Unit, onUpdate: (Sale, Sa
 @Composable
 fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
     val scope = rememberCoroutineScope()
+    val keyboard = LocalSoftwareKeyboardController.current
     val accessories = remember { mutableStateListOf<AccessoryItem>().apply { addAll(sale.accessories) } }
     val services = remember { mutableStateListOf<ServiceItem>().apply { addAll(sale.services) } }
     var searchQuery by remember { mutableStateOf("") }
     var searchResults by remember { mutableStateOf(listOf<FiveElementProduct>()) }
     var searching by remember { mutableStateOf(false) }
     var searchMode by remember { mutableStateOf("bracket") }
+    var priceFromInput by remember { mutableStateOf("") }
+    var priceToInput by remember { mutableStateOf("") }
     var warrantyOptions by remember { mutableStateOf(listOf<WarrantyOption>()) }
     var loadingWarranty by remember { mutableStateOf(false) }
 
@@ -407,35 +407,65 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                         label = { Text("Саундбары") }
                     )
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
+
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    label = { Text(if (searchMode == "bracket") "Кронштейн..." else "Саундбар...") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        label = { Text(if (searchMode == "bracket") "Кронштейн..." else "Саундбар...") },
+                        value = priceFromInput,
+                        onValueChange = { new -> priceFromInput = new.filter { it.isDigit() } },
+                        label = { Text("Цена от") },
                         modifier = Modifier.weight(1f),
-                        singleLine = true
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number,
+                            imeAction = ImeAction.Next
+                        )
                     )
-                    Spacer(Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            searching = true
-                            scope.launch {
-                                searchResults = if (searchMode == "bracket")
-                                    PriceRepository.searchBrackets(searchQuery)
-                                else
-                                    PriceRepository.searchSoundbars(searchQuery)
-                                searching = false
-                            }
-                        },
-                        enabled = searchQuery.length >= 3 && !searching,
-                        colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary)
-                    ) { Text("Найти") }
+                    OutlinedTextField(
+                        value = priceToInput,
+                        onValueChange = { new -> priceToInput = new.filter { it.isDigit() } },
+                        label = { Text("Цена до") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number,
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = KeyboardActions(onDone = { keyboard?.hide() })
+                    )
                 }
+
+                Button(
+                    onClick = {
+                        searching = true
+                        scope.launch {
+                            val from = priceFromInput.toIntOrNull()
+                            val to = priceToInput.toIntOrNull()
+                            searchResults = if (searchMode == "bracket")
+                                PriceRepository.searchBrackets(searchQuery, from, to)
+                            else
+                                PriceRepository.searchSoundbars(searchQuery, from, to)
+                            searching = false
+                        }
+                    },
+                    enabled = searchQuery.length >= 3 && !searching,
+                    colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary),
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Найти") }
+
                 if (searching) CircularProgressIndicator(Modifier.size(24.dp), color = TvStatsPrimary)
                 searchResults.forEach { prod ->
                     Card(Modifier.fillMaxWidth().clickable {
                         accessories.add(AccessoryItem(prod.name, prod.price))
                         searchResults = emptyList(); searchQuery = ""
+                        priceFromInput = ""; priceToInput = ""
                     }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
                         Column(Modifier.padding(8.dp)) {
                             Text(prod.name, fontSize = 13.sp, color = TvStatsText)
@@ -452,184 +482,4 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     Card(Modifier.fillMaxWidth().clickable {
                         if (services.none { it.name == svc.name }) services.add(svc)
                     }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
-                        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(svc.name, Modifier.weight(1f), fontSize = 13.sp, color = TvStatsText)
-                            Text("${moneyFormat.format(svc.price)} BYN", color = TvStatsPrimary,
-                                fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(onClick = {
-                onSave(sale.copy(accessories = accessories.toList(), services = services.toList()))
-            }, colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary)) { Text("Сохранить") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
-    )
-}
-
-@Composable
-fun SettingsScreen(
-    sales: List<Sale>,
-    plans: Map<String, EmployeePlan>,
-    onPlansChange: (Map<String, EmployeePlan>) -> Unit
-) {
-    var selectedEmployee by remember { mutableStateOf<String?>(null) }
-    val keyboard = LocalSoftwareKeyboardController.current
-
-    Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp)) {
-
-        Text("Результат сотрудника", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TvStatsText)
-        HorizontalDivider(Modifier.padding(vertical = 4.dp))
-
-        employees.forEach { name ->
-            val employeeSales = sales.filter { it.employee == name }
-            val factProduct = employeeSales.sumOf { it.price }
-            val factAccessories = employeeSales.sumOf { it.accessorySum }
-            val factService = employeeSales.sumOf { it.serviceSum }
-
-            val plan = plans[name] ?: EmployeePlan()
-            val planAccessories = if (plan.accessories > 0) plan.accessories else plan.product * 0.17
-            val planService = if (plan.service > 0) plan.service else plan.product * 0.07
-
-            Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
-                elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(name, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                            modifier = Modifier.weight(1f), color = TvStatsText)
-                        IconButton(onClick = {
-                            selectedEmployee = if (selectedEmployee == name) null else name
-                        }) {
-                            Icon(if (selectedEmployee == name) Icons.Default.KeyboardArrowUp else Icons.Default.Edit,
-                                "Редактировать план", tint = TvStatsPrimary)
-                        }
-                    }
-
-                    AnimatedVisibility(selectedEmployee == name) {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Spacer(Modifier.height(4.dp))
-                            var productInput by remember(name) { mutableStateOf(plan.product.toInt().toString()) }
-                            var accInput by remember(name) { mutableStateOf(planAccessories.toInt().toString()) }
-                            var srvInput by remember(name) { mutableStateOf(planService.toInt().toString()) }
-
-                            OutlinedTextField(
-                                value = productInput,
-                                onValueChange = { new -> productInput = new.filter { it.isDigit() } },
-                                label = { Text("План товар, BYN") },
-                                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = { keyboard?.hide() })
-                            )
-                            OutlinedTextField(
-                                value = accInput,
-                                onValueChange = { new -> accInput = new.filter { it.isDigit() } },
-                                label = { Text("План аксессуары, BYN") },
-                                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = { keyboard?.hide() })
-                            )
-                            OutlinedTextField(
-                                value = srvInput,
-                                onValueChange = { new -> srvInput = new.filter { it.isDigit() } },
-                                label = { Text("План доп. сервис, BYN") },
-                                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = { keyboard?.hide() })
-                            )
-                            Button(
-                                onClick = {
-                                    val p = productInput.toDoubleOrNull() ?: plan.product
-                                    val a = accInput.toDoubleOrNull() ?: planAccessories
-                                    val s = srvInput.toDoubleOrNull() ?: planService
-                                    onPlansChange(plans + (name to EmployeePlan(p, a, s)))
-                                    selectedEmployee = null
-                                    keyboard?.hide()
-                                },
-                                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary)
-                            ) { Text("Сохранить") }
-                        }
-                    }
-
-                    Spacer(Modifier.height(12.dp))
-                    MetricRow("Товар", factProduct, plan.product)
-                    Spacer(Modifier.height(12.dp))
-                    HorizontalDivider()
-                    Spacer(Modifier.height(12.dp))
-                    MetricRow("Аксессуары", factAccessories, planAccessories)
-                    Spacer(Modifier.height(12.dp))
-                    HorizontalDivider()
-                    Spacer(Modifier.height(12.dp))
-                    MetricRow("Доп. сервис", factService, planService)
-                }
-            }
-        }
-
-        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
-            elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
-                Text("Версия: 1.0.0", fontSize = 14.sp, color = TvStatsTextSecondary)
-                Text("Разработчик: Матранг", fontSize = 14.sp, color = TvStatsTextSecondary)
-                Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp, color = TvStatsTextSecondary)
-                Text("Источник: 5element.by", fontSize = 14.sp, color = TvStatsTextSecondary)
-            }
-        }
-    }
-}
-
-@Composable
-fun MetricRow(title: String, fact: Double, plan: Double) {
-    val percent = if (plan > 0) (fact / plan * 100).coerceAtMost(999.0) else 0.0
-
-    // Логика цвета:
-    // < 20%   → красный
-    // 20-60%  → жёлтый/оранжевый
-    // >= 60%  → зелёный
-    val color = when {
-        percent < 20.0 -> TvStatsRed
-        percent < 60.0 -> TvStatsOrange
-        else -> TvStatsGreen
-    }
-
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = TvStatsText)
-            Spacer(Modifier.height(6.dp))
-            Text("Результат", fontSize = 12.sp, color = TvStatsTextSecondary)
-            Text(moneyFormat.format(fact), fontSize = 22.sp, color = color, fontWeight = FontWeight.Bold)
-        }
-        CircularProgress(percent = percent, color = color, modifier = Modifier.size(110.dp))
-    }
-}
-
-@Composable
-fun CircularProgress(percent: Double, color: Color, modifier: Modifier = Modifier) {
-    Box(modifier, contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxSize()) {
-            val stroke = 14.dp.toPx()
-            val size = this.size.minDimension - stroke
-            drawArc(
-                color = Color(0xFFE8EAF0), startAngle = -90f, sweepAngle = 360f, useCenter = false,
-                style = Stroke(width = stroke, cap = StrokeCap.Round),
-                topLeft = androidx.compose.ui.geometry.Offset(stroke / 2, stroke / 2),
-                size = androidx.compose.ui.geometry.Size(size, size)
-            )
-            val sweep = (percent / 100.0 * 360.0).coerceAtMost(360.0).toFloat()
-            drawArc(
-                color = color, startAngle = -90f, sweepAngle = sweep, useCenter = false,
-                style = Stroke(width = stroke, cap = StrokeCap.Round),
-                topLeft = androidx.compose.ui.geometry.Offset(stroke / 2, stroke / 2),
-                size = androidx.compose.ui.geometry.Size(size, size)
-            )
-        }
-        Text("%.1f%%".format(percent), fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TvStatsText)
-    }
-}
+                        Row
