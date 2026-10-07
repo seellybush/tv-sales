@@ -42,7 +42,7 @@ data class FiveElementProduct(
     val oldPrice: Double? = null,
     val diagonal: String = "",
     val url: String = "",
-    val vesa: String = ""   // ← VESA (для ТВ и кронштейнов)
+    val vesa: String = ""
 )
 
 data class AccessoryItem(val name: String, val price: Double)
@@ -122,12 +122,7 @@ object PriceRepository {
         }
     }
 
-    // 🔊 Поиск саундбаров (фильтр по цене в Kotlin)
-    suspend fun searchSoundbars(
-        query: String,
-        priceFrom: Int? = null,
-        priceTo: Int? = null
-    ): List<FiveElementProduct> = withContext(Dispatchers.IO) {
+    suspend fun searchSoundbars(query: String): List<FiveElementProduct> = withContext(Dispatchers.IO) {
         if (query.length < 2) return@withContext emptyList()
         try {
             val encoded = URLEncoder.encode(query, "UTF-8")
@@ -169,15 +164,13 @@ object PriceRepository {
                     )
                 }
                 .filter { it.price > 20 }
-                .filter { priceFrom == null || it.price >= priceFrom }
-                .filter { priceTo == null || it.price <= priceTo }
         } catch (e: Exception) {
             e.printStackTrace()
             emptyList()
         }
     }
 
-    // 🔧 Поиск кронштейнов (фильтр по цене в Kotlin)
+    // 🔧 Поиск кронштейнов (с фильтром по цене в Kotlin)
     suspend fun searchBrackets(
         query: String,
         priceFrom: Int? = null,
@@ -205,7 +198,7 @@ object PriceRepository {
             val body = resp.body?.string() ?: return@withContext emptyList()
             val parsed = json.decodeFromString<DigineticaResponse>(body)
 
-            parsed.products
+            val allBrackets = parsed.products
                 .filter { product ->
                     product.name.contains("кронштейн", ignoreCase = true) ||
                     product.name.contains("крепление", ignoreCase = true)
@@ -221,15 +214,22 @@ object PriceRepository {
                     )
                 }
                 .filter { it.price > 5 }
-                .filter { priceFrom == null || it.price >= priceFrom }
-                .filter { priceTo == null || it.price <= priceTo }
+
+            // Фильтр по цене в Kotlin
+            var result = allBrackets
+            if (priceFrom != null && priceFrom > 0) {
+                result = result.filter { it.price >= priceFrom }
+            }
+            if (priceTo != null && priceTo > 0) {
+                result = result.filter { it.price <= priceTo }
+            }
+            result
         } catch (e: Exception) {
             e.printStackTrace()
             emptyList()
         }
     }
 
-    // 📐 Парсинг VESA с карточки товара (телевизор или кронштейн)
     suspend fun fetchVesa(productUrl: String): String = withContext(Dispatchers.IO) {
         if (productUrl.isEmpty()) return@withContext ""
         try {
@@ -243,8 +243,6 @@ object PriceRepository {
             if (!resp.isSuccessful) return@withContext ""
             val html = resp.body?.string() ?: return@withContext ""
 
-            // Ищем "Крепление VESA | 300х200" или "Совместимость с креплением VESA | 100х100, 200х200, ..."
-            // Регулярка ищет VESA и захватывает всё до конца строки или тега
             val pattern = Pattern.compile(
                 "(?:Крепление\\s+VESA|Совместимость\\s+с\\s+креплением\\s+VESA)\\s*[|:]?\\s*([^<\\n]+)",
                 Pattern.CASE_INSENSITIVE
@@ -259,7 +257,6 @@ object PriceRepository {
         }
     }
 
-    // 📐 Парсинг VESA кронштейнов для списка (параллельно)
     suspend fun enrichBracketsWithVesa(
         products: List<FiveElementProduct>
     ): List<FiveElementProduct> = withContext(Dispatchers.IO) {
