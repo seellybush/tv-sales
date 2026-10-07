@@ -10,7 +10,6 @@ import kotlin.coroutines.resume
 
 object OcrHelper {
 
-    // Реальные диагонали телевизоров (то, что продаётся в РБ)
     private val validDiagonals = setOf(
         24, 28, 32, 39, 40, 42, 43, 48, 50, 55, 58, 60, 65, 70, 75, 77, 83, 85, 98, 100, 115
     )
@@ -31,12 +30,13 @@ object OcrHelper {
     fun extractModel(text: String): String {
         val rawLines = text.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
 
+        // Шум (БЕЗ Quantum — он нужен как якорь)
         val noise = listOf(
             "S/N", "S/NO", "SERIAL", "W/O", "VOLTAGE", "WEIGHT", "DIMENSIONS",
             "ТУ BY", "TYBY", "ТУBY", "ИЗГОТОВИТЕЛЬ", "ИМПОРТЕР", "СДЕЛАНО",
             "АДРЕС", "НАПРЯЖЕНИЕ", "ПИТАНИЕ", "ГАРАНТИЙНЫЙ", "СЕРВИСНЫЙ",
             "ТЕЛЕВИЗОР", "ТЕЛЕДИДАР", "EAC", "HDMI", "USB", "WEBOS", "TIZEN",
-            "ANDROID", "GOOGLE", "SMART", "QUANTUM", "КВАНТУМ"
+            "ANDROID", "GOOGLE", "SMART"
         )
 
         fun isNoise(line: String): Boolean {
@@ -59,7 +59,7 @@ object OcrHelper {
             if (!upper.any { it.isDigit() }) return false
             if (!upper.any { it.isLetter() }) return false
 
-            // ❗ Диагональ должна быть РЕАЛЬНОЙ
+            // Диагональ реальная
             val diag = Regex("^(\\d{2,3})").find(upper)?.groupValues?.get(1)?.toIntOrNull() ?: return false
             if (diag !in validDiagonals) return false
 
@@ -77,38 +77,86 @@ object OcrHelper {
             return r
         }
 
-        data class Candidate(val value: String, val priority: Int)
-        val candidates = mutableListOf<Candidate>()
-
-        for (i in rawLines.indices) {
-            val line = rawLines[i]
-            if (isNoise(line)) continue
+        // === ПРИОРИТЕТ 1: QUANTUM ===
+        // Ищем строку, где "Quantum" + пробел + код (например, "Quantum 65U6BQ")
+        for (line in rawLines) {
             if (isSerial(line)) continue
-
-            val matches = Regex("\\b(2[48]|3[29]|4[0238]|50|5[058]|60|65|70|75|77|83|85|98)([A-Z]{1,8}\\d{0,5}[A-Z0-9]{0,8})\\b")
-                .findAll(fixOcr(line))
-
-            for (m in matches) {
-                val c = m.value
-                if (!isCleanModel(c)) continue
-
-                val prev = if (i > 0) rawLines[i - 1].uppercase() else ""
-                val curr = line.uppercase()
-
-                var priority = 5
-                if (curr.contains("QUANTUM") && c.length in 5..10) priority = 1
-                else if (prev.contains("QUANTUM")) priority = 1
-                else if (curr.contains("MODEL") || prev.contains("MODEL") ||
-                         curr.contains("МОДЕЛЬ") || prev.contains("МОДЕЛЬ")) priority = 2
-                else if (prev.contains("W/O")) priority = 3
-                else if (i < 5) priority = 4
-
-                if (c.length in 5..10) priority -= 1
-                candidates.add(Candidate(c, priority))
+            val match = Regex("(?i)quantum\\s+([0-9]{2}[A-Z0-9]{2,10})").find(line)
+            if (match != null) {
+                val candidate = fixOcr(match.groupValues[1])
+                if (isCleanModel(candidate)) return candidate
+            }
+        }
+        // Fallback: "Quantum65U6BQ" без пробела, но с коротким кодом
+        for (line in rawLines) {
+            if (isSerial(line)) continue
+            val match = Regex("(?i)quantum([0-9]{2}[A-Z][A-Z0-9]{2,8})").find(line)
+            if (match != null) {
+                val candidate = fixOcr(match.groupValues[1])
+                if (isCleanModel(candidate)) return candidate
             }
         }
 
-        return candidates.sortedWith(compareBy({ it.priority }, { it.value.length }))
-            .firstOrNull()?.value ?: ""
+        // === ПРИОРИТЕТ 2: LG ===
+        val isLG = rawLines.any { it.contains("LG", ignoreCase = true) ||
+                                  it.contains("S/NO", ignoreCase = true) }
+        if (isLG) {
+            for (i in rawLines.indices) {
+                if (rawLines[i].uppercase().contains("W/O")) {
+                    if (i + 1 < rawLines.size) {
+                        val candidate = fixOcr(rawLines[i + 1].replace(" ", "").substringBefore("."))
+                        if (isCleanModel(candidate)) return candidate
+                    }
+                }
+            }
+            for (line in rawLines) {
+                if (isNoise(line)) continue
+                if (isSerial(line)) continue
+                val cleaned = fixOcr(line.substringBefore("."))
+                val m = Regex("(\\d{2})([A-Z]{1,8}\\d{0,5}[A-Z0-9]{0,8})").find(cleaned)
+                if (m != null && isCleanModel(m.value)) return m.value
+            }
+        }
+
+        // === ПРИОРИТЕТ 3: Строка после MODEL/МОДЕЛЬ ===
+        for (i in rawLines.indices) {
+            val u = rawLines[i].uppercase()
+            if (u.contains("MODEL") || u.contains("МОДЕЛЬ")) {
+                val after = u.replace("MODEL", "").replace("МОДЕЛЬ", "").replace(":", "").trim()
+                if (after.length >= 4) {
+                    val c = fixOcr(after)
+                    if (isCleanModel(c)) return c
+                }
+                if (i + 1 < rawLines.size) {
+                    val c = fixOcr(rawLines[i + 1].substringBefore("."))
+                    if (isCleanModel(c)) return c
+                }
+            }
+        }
+
+        // === ПРИОРИТЕТ 4: Первые 7 строк с паттерном модели ===
+        for (i in 0 until minOf(7, rawLines.size)) {
+            if (isNoise(rawLines[i])) continue
+            if (isSerial(rawLines[i])) continue
+            val cleaned = fixOcr(rawLines[i])
+            val matches = Regex("(2[48]|3[29]|4[0238]|50|5[058]|60|65|70|75|77|83|85|98)([A-Z]{1,8}\\d{0,5}[A-Z0-9]{0,8})")
+                .findAll(cleaned)
+            for (m in matches) {
+                if (isCleanModel(m.value)) return m.value
+            }
+        }
+
+        // === ПРИОРИТЕТ 5: Любой паттерн, самый длинный ===
+        val allText = rawLines
+            .filter { !isNoise(it) && !isSerial(it) }
+            .joinToString(" ")
+            .uppercase()
+        var best = ""
+        for (m in Regex("(2[48]|3[29]|4[0238]|50|5[058]|60|65|70|75|77|83|85|98)([A-Z]{1,8}\\d{0,5}[A-Z0-9]{0,8})")
+            .findAll(allText)) {
+            val c = fixOcr(m.value)
+            if (isCleanModel(c) && c.length > best.length) best = c
+        }
+        return best
     }
 }
