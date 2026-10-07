@@ -499,4 +499,98 @@ fun SettingsScreen(
                             )
                             OutlinedTextField(
                                 value = accInput,
-                                onValueChange = { new -> accInput
+                                onValueChange = { new -> accInput = new.filter { it.isDigit() } },
+                                label = { Text("План аксессуары, BYN") },
+                                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = { keyboard?.hide() })
+                            )
+                            OutlinedTextField(
+                                value = srvInput,
+                                onValueChange = { new -> srvInput = new.filter { it.isDigit() } },
+                                label = { Text("План доп. сервис, BYN") },
+                                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = { keyboard?.hide() })
+                            )
+                            Button(
+                                onClick = {
+                                    val p = productInput.toDoubleOrNull() ?: plan.product
+                                    val a = accInput.toDoubleOrNull() ?: planAccessories
+                                    val s = srvInput.toDoubleOrNull() ?: planService
+                                    onPlansChange(plans + (name to EmployeePlan(p, a, s)))
+                                    selectedEmployee = null
+                                    keyboard?.hide()
+                                },
+                                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary)
+                            ) { Text("Сохранить") }
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+                    MetricRow("Товар", factProduct, plan.product, TvStatsOrange)
+                    Spacer(Modifier.height(12.dp))
+                    HorizontalDivider()
+                    Spacer(Modifier.height(12.dp))
+                    MetricRow("Аксессуары", factAccessories, planAccessories, TvStatsOrange)
+                    Spacer(Modifier.height(12.dp))
+                    HorizontalDivider()
+                    Spacer(Modifier.height(12.dp))
+                    MetricRow("Доп. сервис", factService, planService, TvStatsGreen)
+                }
+            }
+        }
+
+        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
+            elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
+                Text("Версия: 1.0.0", fontSize = 14.sp, color = TvStatsTextSecondary)
+                Text("Разработчик: Матранг", fontSize = 14.sp, color = TvStatsTextSecondary)
+                Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp, color = TvStatsTextSecondary)
+                Text("Источник: 5element.by", fontSize = 14.sp, color = TvStatsTextSecondary)
+            }
+        }
+    }
+}
+
+@Composable
+fun MetricRow(title: String, fact: Double, plan: Double, color: Color) {
+    val percent = if (plan > 0) (fact / plan * 100).coerceAtMost(999.0) else 0.0
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = TvStatsText)
+            Spacer(Modifier.height(6.dp))
+            Text("Результат", fontSize = 12.sp, color = TvStatsTextSecondary)
+            Text(moneyFormat.format(fact), fontSize = 22.sp, color = color, fontWeight = FontWeight.Bold)
+        }
+        CircularProgress(percent = percent, color = color, modifier = Modifier.size(110.dp))
+    }
+}
+
+@Composable
+fun CircularProgress(percent: Double, color: Color, modifier: Modifier = Modifier) {
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val stroke = 14.dp.toPx()
+            val size = this.size.minDimension - stroke
+            drawArc(
+                color = Color(0xFFE8EAF0), startAngle = -90f, sweepAngle = 360f, useCenter = false,
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+                topLeft = androidx.compose.ui.geometry.Offset(stroke / 2, stroke / 2),
+                size = androidx.compose.ui.geometry.Size(size, size)
+            )
+            val sweep = (percent / 100.0 * 360.0).coerceAtMost(360.0).toFloat()
+            drawArc(
+                color = color, startAngle = -90f, sweepAngle = sweep, useCenter = false,
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+                topLeft = androidx.compose.ui.geometry.Offset(stroke / 2, stroke / 2),
+                size = androidx.compose.ui.geometry.Size(size, size)
+            )
+        }
+        Text("%.1f%%".format(percent), fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TvStatsText)
+    }
+}
