@@ -1,5 +1,6 @@
 package by.tvsales
 
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -110,6 +111,38 @@ fun App() {
         )
     }
 
+    // === Проверка обновлений при старте ===
+    val context = LocalContext.current
+    var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
+
+    LaunchedEffect(Unit) {
+        updateInfo = UpdateChecker.checkForUpdates()
+    }
+
+    updateInfo?.let { info ->
+        AlertDialog(
+            onDismissRequest = { updateInfo = null },
+            title = { Text("Доступно обновление", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text("Новая версия: ${info.version}")
+                    Spacer(Modifier.height(8.dp))
+                    Text(info.releaseNotes, fontSize = 13.sp, color = TvStatsTextSecondary)
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(info.downloadUrl))
+                    context.startActivity(intent)
+                    updateInfo = null
+                }) { Text("Скачать") }
+            },
+            dismissButton = {
+                TextButton(onClick = { updateInfo = null }) { Text("Позже") }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             Box(
@@ -161,7 +194,6 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
     var message by remember { mutableStateOf("Введите модель телевизора") }
     var showCamera by remember { mutableStateOf(false) }
 
-    // Галерея
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
@@ -186,27 +218,23 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
         if (query.length >= 3) { delay(600); suggestions = PriceRepository.searchTVs(query) } else suggestions = emptyList()
     }
 
-    // Полноэкранная камера
     if (showCamera) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             CameraScanner(
-    onModelDetected = { model ->
-        query = model
-        selectedProduct = null
-        message = "Распознано: $model"
-        showCamera = false
-        scope.launch {
-            suggestions = PriceRepository.searchTVs(model)
-        }
-    },
-    onDismiss = { showCamera = false }
-)
+                onModelDetected = { model ->
+                    query = model
+                    selectedProduct = null
+                    message = "Распознано: $model"
+                    showCamera = false
+                    scope.launch { suggestions = PriceRepository.searchTVs(model) }
+                },
+                onDismiss = { showCamera = false }
+            )
         }
         return
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        // === 1. МОДЕЛЬ ТЕЛЕВИЗОРА ===
         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
@@ -226,10 +254,7 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
                         }
                     }
                 )
-
                 Spacer(Modifier.height(8.dp))
-
-                // Две кнопки: камера + галерея
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = { showCamera = true },
@@ -255,7 +280,6 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
                         Text("Галерея")
                     }
                 }
-
                 AnimatedVisibility(suggestions.isNotEmpty() && selectedProduct == null) {
                     LazyColumn(Modifier.fillMaxWidth().heightIn(max = 250.dp).padding(top = 8.dp)) {
                         items(suggestions.size) { index ->
@@ -279,7 +303,6 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
             }
         }
 
-        // === 2. КТО ПРОДАЁТ ===
         var empExpanded by remember { mutableStateOf(false) }
         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
@@ -299,7 +322,6 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
             }
         }
 
-        // === 3. ВЫБРАННЫЙ ТОВАР ===
         selectedProduct?.let { sp ->
             Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
                 elevation = CardDefaults.cardElevation(4.dp), modifier = Modifier.fillMaxWidth()) {
@@ -671,7 +693,7 @@ fun SettingsScreen(
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
-                Text("Версия: 1.6.0", fontSize = 14.sp, color = TvStatsTextSecondary)
+                Text("Версия: 1.7.0", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Разработчик: Матранг", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Источник: 5element.by", fontSize = 14.sp, color = TvStatsTextSecondary)
@@ -683,13 +705,11 @@ fun SettingsScreen(
 @Composable
 fun MetricRow(title: String, fact: Double, plan: Double) {
     val percent = if (plan > 0) (fact / plan * 100).coerceAtMost(999.0) else 0.0
-
     val color = when {
         percent < 20.0 -> TvStatsRed
         percent < 60.0 -> TvStatsOrange
         else -> TvStatsGreen
     }
-
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = TvStatsText)
