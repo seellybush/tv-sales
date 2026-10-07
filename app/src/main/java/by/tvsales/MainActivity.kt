@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -160,7 +161,6 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
     var message by remember { mutableStateOf("Введите модель телевизора") }
     var showCamera by remember { mutableStateOf(false) }
 
-    // Функция поиска с перебором OCR-вариантов
     fun searchWithVariants(model: String) {
         scope.launch {
             var found: List<FiveElementProduct> = emptyList()
@@ -196,7 +196,7 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
                     selectedProduct = null
                     searchWithVariants(model)
                 } else {
-                    message = "Не удалось распознать модель. Введите вручную."
+                    message = "OCR: ${text.replace("\n", " ").take(150)}"
                 }
             }
         }
@@ -405,6 +405,7 @@ fun SalesScreen(sales: List<Sale>, onDelete: (Sale) -> Unit, onUpdate: (Sale, Sa
 fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     val accessories = remember { mutableStateListOf<AccessoryItem>().apply { addAll(sale.accessories) } }
     val services = remember { mutableStateListOf<ServiceItem>().apply { addAll(sale.services) } }
     var searchQuery by remember { mutableStateOf("") }
@@ -425,6 +426,7 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
     fun doSearch() {
         if (searchQuery.length < 3) return
         keyboard?.hide()
+        focusManager.clearFocus()
         searching = true
         scope.launch {
             searchResults = if (searchMode == "bracket")
@@ -469,6 +471,7 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 }
 
+                // === ГАРАНТИЯ — выбор одного варианта ===
                 Text("🛡️ Расширенная гарантия", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsText)
                 if (loadingWarranty) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -479,14 +482,24 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                 } else if (warrantyOptions.isEmpty()) {
                     Text("Гарантия для этой модели не найдена", fontSize = 12.sp, color = TvStatsTextSecondary)
                 } else {
+                    val selectedWarrantyName = services.firstOrNull { it.name.startsWith("Гарантия +") }?.name
                     warrantyOptions.forEach { w ->
+                        val name = "Гарантия +${w.years} год"
+                        val isSelected = selectedWarrantyName == name
                         Card(Modifier.fillMaxWidth().clickable {
-                            val name = "Гарантия +${w.years} год"
-                            if (services.none { it.name == name }) services.add(ServiceItem(name, w.price))
-                        }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
+                            services.removeAll { it.name.startsWith("Гарантия +") }
+                            services.add(ServiceItem(name, w.price))
+                        }, colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected) TvStatsPrimary.copy(alpha = 0.15f) else TvStatsBg
+                        )) {
                             Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (isSelected) {
+                                    Icon(Icons.Default.Check, null, tint = TvStatsPrimary, modifier = Modifier.size(20.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                }
                                 Text("+${w.years} год", Modifier.weight(1f), fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium, color = TvStatsText)
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = TvStatsText)
                                 Text("${moneyFormat.format(w.price)} BYN", color = TvStatsPrimary,
                                     fontSize = 13.sp, fontWeight = FontWeight.Bold)
                             }
@@ -539,6 +552,8 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     Card(Modifier.fillMaxWidth().clickable {
                         accessories.add(AccessoryItem(prod.name, prod.price))
                         searchResults = emptyList(); searchQuery = ""
+                        keyboard?.hide()
+                        focusManager.clearFocus()
                     }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
                         Column(Modifier.padding(8.dp)) {
                             Text(prod.name, fontSize = 13.sp, color = TvStatsText)
@@ -679,7 +694,7 @@ fun SettingsScreen(
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
-                Text("Версия: 1.10.0", fontSize = 14.sp, color = TvStatsTextSecondary)
+                Text("Версия: 1.11.0", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Разработчик: Матранг", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Источник: 5element.by", fontSize = 14.sp, color = TvStatsTextSecondary)
