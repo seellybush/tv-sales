@@ -36,6 +36,7 @@ import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.util.Locale
 
+// === Мягкая пастельная палитра «TV STATS» ===
 val TvStatsBg = Color(0xFFF0F4F8)
 val TvStatsCard = Color(0xFFFFFFFF)
 val TvStatsPrimary = Color(0xFF5B8DEF)
@@ -58,7 +59,7 @@ data class Sale(
     val price: Double,
     val employee: String,
     val productId: String = "",
-    val productUrl: String = "",     // ← сохраняем URL для парсинга гарантии
+    val productUrl: String = "",
     val accessories: List<AccessoryItem> = emptyList(),
     val services: List<ServiceItem> = emptyList()
 ) {
@@ -320,7 +321,7 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
     var searchQuery by remember { mutableStateOf("") }
     var searchResults by remember { mutableStateOf(listOf<FiveElementProduct>()) }
     var searching by remember { mutableStateOf(false) }
-    var searchMode by remember { mutableStateOf("bracket") } // "bracket" или "soundbar"
+    var searchMode by remember { mutableStateOf("bracket") }
     var warrantyOptions by remember { mutableStateOf(listOf<WarrantyOption>()) }
     var loadingWarranty by remember { mutableStateOf(false) }
 
@@ -366,7 +367,6 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 }
 
-                // 🛡️ ГАРАНТИЯ
                 Text("🛡️ Расширенная гарантия", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsText)
                 if (loadingWarranty) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -394,7 +394,6 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
-                // === ПОИСК АКСЕССУАРОВ: КРОНШТЕЙНЫ / САУНДБАРЫ ===
                 Text("🔍 Поиск аксессуаров", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsText)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
@@ -448,7 +447,6 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
-                // 🎬 ПОДПИСКИ
                 Text("🎬 Подписки и сервисы", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsText)
                 videoServices.forEach { svc ->
                     Card(Modifier.fillMaxWidth().clickable {
@@ -561,15 +559,15 @@ fun SettingsScreen(
                     }
 
                     Spacer(Modifier.height(12.dp))
-                    MetricRow("Товар", factProduct, plan.product, TvStatsOrange)
+                    MetricRow("Товар", factProduct, plan.product)
                     Spacer(Modifier.height(12.dp))
                     HorizontalDivider()
                     Spacer(Modifier.height(12.dp))
-                    MetricRow("Аксессуары", factAccessories, planAccessories, TvStatsOrange)
+                    MetricRow("Аксессуары", factAccessories, planAccessories)
                     Spacer(Modifier.height(12.dp))
                     HorizontalDivider()
                     Spacer(Modifier.height(12.dp))
-                    MetricRow("Доп. сервис", factService, planService, TvStatsGreen)
+                    MetricRow("Доп. сервис", factService, planService)
                 }
             }
         }
@@ -588,8 +586,19 @@ fun SettingsScreen(
 }
 
 @Composable
-fun MetricRow(title: String, fact: Double, plan: Double, color: Color) {
+fun MetricRow(title: String, fact: Double, plan: Double) {
     val percent = if (plan > 0) (fact / plan * 100).coerceAtMost(999.0) else 0.0
+
+    // Логика цвета:
+    // < 20%   → красный
+    // 20-60%  → жёлтый/оранжевый
+    // >= 60%  → зелёный
+    val color = when {
+        percent < 20.0 -> TvStatsRed
+        percent < 60.0 -> TvStatsOrange
+        else -> TvStatsGreen
+    }
+
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = TvStatsText)
