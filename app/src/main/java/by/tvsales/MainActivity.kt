@@ -160,6 +160,30 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
     var message by remember { mutableStateOf("Введите модель телевизора") }
     var showCamera by remember { mutableStateOf(false) }
 
+    // Функция поиска с перебором OCR-вариантов
+    fun searchWithVariants(model: String) {
+        scope.launch {
+            var found: List<FiveElementProduct> = emptyList()
+            var usedModel = model
+            for (variant in OcrHelper.generateSearchVariants(model)) {
+                found = PriceRepository.searchTVs(variant)
+                if (found.isNotEmpty()) {
+                    usedModel = variant
+                    break
+                }
+            }
+            if (found.isEmpty()) {
+                query = model
+                suggestions = emptyList()
+                message = "Модель не найдена в каталоге"
+            } else {
+                query = usedModel
+                suggestions = found
+                message = "Распознано: $usedModel"
+            }
+        }
+    }
+
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
@@ -169,10 +193,8 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
                 val text = OcrHelper.recognizeText(context, uri)
                 val model = OcrHelper.extractModel(text)
                 if (model.isNotEmpty()) {
-                    query = model
                     selectedProduct = null
-                    suggestions = PriceRepository.searchTVs(model)
-                    message = "OCR: ${text.replace("\n", " ").take(150)}"
+                    searchWithVariants(model)
                 } else {
                     message = "Не удалось распознать модель. Введите вручную."
                 }
@@ -188,11 +210,9 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             CameraScanner(
                 onModelDetected = { model ->
-                    query = model
                     selectedProduct = null
-                    message = "Распознано: $model"
                     showCamera = false
-                    scope.launch { suggestions = PriceRepository.searchTVs(model) }
+                    searchWithVariants(model)
                 },
                 onDismiss = { showCamera = false }
             )
@@ -659,7 +679,7 @@ fun SettingsScreen(
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
-                Text("Версия: 1.8.0", fontSize = 14.sp, color = TvStatsTextSecondary)
+                Text("Версия: 1.10.0", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Разработчик: Матранг", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Источник: 5element.by", fontSize = 14.sp, color = TvStatsTextSecondary)
