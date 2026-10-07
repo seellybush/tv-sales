@@ -320,10 +320,10 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
     var searchQuery by remember { mutableStateOf("") }
     var searchResults by remember { mutableStateOf(listOf<FiveElementProduct>()) }
     var searching by remember { mutableStateOf(false) }
+    var searchMode by remember { mutableStateOf("bracket") } // "bracket" или "soundbar"
     var warrantyOptions by remember { mutableStateOf(listOf<WarrantyOption>()) }
     var loadingWarranty by remember { mutableStateOf(false) }
 
-    // 🛡️ Парсим гарантию по URL карточки товара
     LaunchedEffect(sale.productUrl) {
         if (sale.productUrl.isNotEmpty()) {
             loadingWarranty = true
@@ -394,16 +394,43 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
-                Text("🔧 Поиск кронштейнов", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsText)
+                // === ПОИСК АКСЕССУАРОВ: КРОНШТЕЙНЫ / САУНДБАРЫ ===
+                Text("🔍 Поиск аксессуаров", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsText)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = searchMode == "bracket",
+                        onClick = { searchMode = "bracket"; searchResults = emptyList() },
+                        label = { Text("Кронштейны") }
+                    )
+                    FilterChip(
+                        selected = searchMode == "soundbar",
+                        onClick = { searchMode = "soundbar"; searchResults = emptyList() },
+                        label = { Text("Саундбары") }
+                    )
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(value = searchQuery, onValueChange = { searchQuery = it },
-                        label = { Text("Кронштейн...") }, modifier = Modifier.weight(1f), singleLine = true)
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        label = { Text(if (searchMode == "bracket") "Кронштейн..." else "Саундбар...") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
                     Spacer(Modifier.width(8.dp))
-                    Button(onClick = {
-                        searching = true
-                        scope.launch { searchResults = PriceRepository.searchBrackets(searchQuery); searching = false }
-                    }, enabled = searchQuery.length >= 3 && !searching,
-                        colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary)) { Text("Найти") }
+                    Button(
+                        onClick = {
+                            searching = true
+                            scope.launch {
+                                searchResults = if (searchMode == "bracket")
+                                    PriceRepository.searchBrackets(searchQuery)
+                                else
+                                    PriceRepository.searchSoundbars(searchQuery)
+                                searching = false
+                            }
+                        },
+                        enabled = searchQuery.length >= 3 && !searching,
+                        colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary)
+                    ) { Text("Найти") }
                 }
                 if (searching) CircularProgressIndicator(Modifier.size(24.dp), color = TvStatsPrimary)
                 searchResults.forEach { prod ->
@@ -413,21 +440,24 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
                         Column(Modifier.padding(8.dp)) {
                             Text(prod.name, fontSize = 13.sp, color = TvStatsText)
-                            Text("${moneyFormat.format(prod.price)} BYN", color = TvStatsPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("${moneyFormat.format(prod.price)} BYN", color = TvStatsPrimary,
+                                fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
-                Text("🎬 Подписки", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsText)
+                // 🎬 ПОДПИСКИ
+                Text("🎬 Подписки и сервисы", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsText)
                 videoServices.forEach { svc ->
                     Card(Modifier.fillMaxWidth().clickable {
                         if (services.none { it.name == svc.name }) services.add(svc)
                     }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
                         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(svc.name, Modifier.weight(1f), fontSize = 13.sp, color = TvStatsText)
-                            Text("${moneyFormat.format(svc.price)} BYN", color = TvStatsPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("${moneyFormat.format(svc.price)} BYN", color = TvStatsPrimary,
+                                fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
