@@ -39,31 +39,26 @@ data class FiveElementProduct(
     val price: Double = 0.0,
     val oldPrice: Double? = null,
     val diagonal: String = "",
-    val url: String = ""
+    val url: String = ""    // ← сюда сохраняем link_url, чтобы потом парсить гарантию
 )
 
 data class AccessoryItem(val name: String, val price: Double)
 data class ServiceItem(val name: String, val price: Double)
 data class WarrantyOption(val years: Int, val price: Double)
 
-// === ВИДЕОСЕРВИСЫ (обновлённый список) ===
 val videoServices = listOf(
-    // iTV
     ServiceItem("iTV 6 мес", 89.90),
     ServiceItem("iTV 12 мес", 169.90),
     ServiceItem("iTV 24 мес", 349.90),
     ServiceItem("iTV 36 мес", 499.90),
-    // Кинопоиск
     ServiceItem("Кинопоиск 6 мес", 99.90),
     ServiceItem("Кинопоиск 12 мес", 179.90),
     ServiceItem("Кинопоиск 24 мес", 329.90),
     ServiceItem("Кинопоиск 36 мес", 449.90),
-    // Okko Премиум
     ServiceItem("Okko 6 мес", 94.90),
     ServiceItem("Okko 12 мес", 189.90),
     ServiceItem("Okko 24 мес", 324.90),
     ServiceItem("Okko 36 мес", 444.90),
-    // VOKA
     ServiceItem("VOKA 12 мес", 199.90),
     ServiceItem("VOKA 24 мес", 349.90),
     ServiceItem("VOKA 36 мес", 499.00)
@@ -110,7 +105,7 @@ object PriceRepository {
                         price = product.price.toDoubleOrNull() ?: 0.0,
                         oldPrice = product.oldPrice?.toDoubleOrNull(),
                         diagonal = extractDiagonal(product.name),
-                        url = "https://5element.by${product.link_url}"
+                        url = "https://5element.by${product.link_url}"  // ← сохраняем URL
                     )
                 }
                 .filter { it.price > 50 }
@@ -120,7 +115,6 @@ object PriceRepository {
         }
     }
 
-    // 🔍 Поиск ТОЛЬКО кронштейнов (фильтр по названию)
     suspend fun searchBrackets(query: String): List<FiveElementProduct> = withContext(Dispatchers.IO) {
         if (query.length < 2) return@withContext emptyList()
         try {
@@ -144,7 +138,6 @@ object PriceRepository {
             val body = resp.body?.string() ?: return@withContext emptyList()
             val parsed = json.decodeFromString<DigineticaResponse>(body)
 
-            // Фильтр ТОЛЬКО по названию «кронштейн»
             parsed.products
                 .filter { product ->
                     product.name.contains("кронштейн", ignoreCase = true) ||
@@ -167,26 +160,32 @@ object PriceRepository {
         }
     }
 
-    suspend fun fetchWarranty(productId: String): List<WarrantyOption> = withContext(Dispatchers.IO) {
-        if (productId.isEmpty()) return@withContext emptyList()
+    // 🛡️ Парсинг гарантии — ТЕПЕРЬ ПО URL КАРТОЧКИ (а не по ID)
+    suspend fun fetchWarrantyByUrl(productUrl: String): List<WarrantyOption> = withContext(Dispatchers.IO) {
+        if (productUrl.isEmpty()) return@withContext emptyList()
         try {
-            val url = "https://5element.by/products/$productId"
-            val req = Request.Builder().url(url)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-                .header("Accept", "text/html").build()
+            val req = Request.Builder()
+                .url(productUrl)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header("Accept", "text/html,application/xhtml+xml")
+                .header("Accept-Language", "ru-RU,ru;q=0.9")
+                .build()
 
             val resp = client.newCall(req).execute()
             if (!resp.isSuccessful) return@withContext emptyList()
             val html = resp.body?.string() ?: return@withContext emptyList()
 
+            // Ищем protection-plus data='[{...}]'
             val pattern = Pattern.compile("protection-plus\\s+data='(\\[.*?\\])'", Pattern.DOTALL)
             val matcher = pattern.matcher(html)
             if (!matcher.find()) return@withContext emptyList()
 
             val jsonStr = matcher.group(1) ?: return@withContext emptyList()
             val result = mutableListOf<WarrantyOption>()
+
+            // Парсим: {"title":"На N год X.XX ...","price":X}
             val itemPattern = Pattern.compile(
-                "\\{[^}]*\"title\"\\s*:\\s*\"На\\s+(\\d+)\\s+год[^\"]*?\"[^}]*\"price\"\\s*:\\s*([\\d.]+)",
+                "\\{[^}]*\"title\"\\s*:\\s*\"На\\s+(\\d+)\\s+год[^\"]*?\"[^}]*?\"price\"\\s*:\\s*([\\d.]+)",
                 Pattern.DOTALL
             )
             val itemMatcher = itemPattern.matcher(jsonStr)
