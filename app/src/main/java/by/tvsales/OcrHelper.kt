@@ -28,13 +28,8 @@ object OcrHelper {
         val rawLines = text.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
         val upperLines = rawLines.map { it.uppercase() }
 
-        val isLG = upperLines.any { it.contains("LG") || it.contains("ABYGLJU") || it.contains("WEBOS") }
-        val isQuantum = upperLines.any { it.contains("QUANTUM") }
-        val isSamsung = upperLines.any { it.contains("SAMSUNG") || it.contains("TIZEN") }
-        val isHisense = upperLines.any { it.contains("HISENSE") || it.contains("VIDAA") }
-
-        // 🚫 ЖЁСТКИЙ ЧЁРНЫЙ СПИСОК (игнорируем эти строки полностью)
-        val blacklist = listOf(
+        // === 🚫 ЗАПРЕЩЁННЫЕ СЛОВА (если есть — строка мусорная) ===
+        val forbiddenWords = listOf(
             "S/N", "SERIAL", "W/O", "DATE", "VOLTAGE", "WEIGHT", "DIMENSIONS",
             "КГ", "ММ", "ВТ", "HZ", "ГАРАНТИЙНЫЙ", "СЕРВИСНЫЙ", "АДРЕС",
             "ТЕЛ", "EAC", "TPB", "HDMI", "USB", "HDCP", "WEBOS", "TIZEN",
@@ -44,42 +39,46 @@ object OcrHelper {
             "ИНФОРМАЦИОННЫЙ", "ЦЕНТР", "БЕСПЛАТНЫЙ", "ЗВОНОК", "СВЯЗЬ",
             "РАЗРЕШЕНИЕ", "ДИАГОНАЛЬ", "ПИТАНИЕ", "НАПРЯЖЕНИЕ",
             "ЭКРАН", "ТИП", "МОЩНОСТЬ", "ВЕС", "ГАБАРИТ", "СТРАНА",
-            "СЕРТИФИКАТ", "СТАНДАРТ", "ПАМЯТЬ", "ПРОЦЕССОР", "ЧАСТОТА"
+            "СЕРТИФИКАТ", "СТАНДАРТ", "ПАМЯТЬ", "ПРОЦЕССОР", "ЧАСТОТА",
+            "ULTRA", "FULL", "PIX", "ПИКС", "SMART", "TV"
         )
 
-        // Запрещённые паттерны (разрешения, напряжения, стандарты)
-        val forbiddenPatterns = listOf(
-            Regex("\\d{3,4}[Xx]\\d{3,4}"),         // 3840x2160, 1920x1080
-            Regex("\\b\\d{3,4}P\\b"),               // 1080P, 720P
-            Regex("\\b(1080|720|2160|3840|4096|8K|4K|2K|UHD|FHD|HD|SD)\\b"),
-            Regex("\\b(220|240|110|120)[-–]?\\d{2,3}V\\b"), // 220-240V
-            Regex("\\b\\d{2,3}\\s?HZ\\b"),          // 50HZ, 60HZ
-            Regex("\\b\\d{3,4}[Xx]\\d{3,4}[A-Z]{0,3}\\b"),
-            Regex("^\\d{4,}$")                       // только цифры 4+
-        )
-
-        // Модель: начинается с 2-3 цифр (24-115), затем буквы/цифры
-        // НЕ содержит X между группами цифр
-        val modelPattern = Pattern.compile(
-            "\\b(2[4-9]|[3-9]\\d|1[01]\\d)([A-Z]{1,6}\\d{0,5}[A-Z0-9]{0,8})\\b"
+        // === 🔒 СТРОГИЙ ЗАПРЕТ: разрешения и напряжения ===
+        val resolutionNumbers = listOf(
+            "3840", "2160", "1920", "1080", "1366", "768", "720", "4096",
+            "2560", "1440", "1600", "900", "1200", "800"
         )
 
         fun isCleanModel(s: String): Boolean {
             val upper = s.uppercase().trim()
-            if (upper.length < 4 || upper.length > 20) return false
-            if (blacklist.any { upper.contains(it) }) return false
-            if (forbiddenPatterns.any { it.containsMatchIn(upper) }) return false
+            
+            // 1. Длина 4–15 символов
+            if (upper.length < 4 || upper.length > 15) return false
+            
+            // 2. Нет запрещённых слов
+            if (forbiddenWords.any { upper.contains(it) }) return false
+            
+            // 3. Нет разрешений внутри строки
+            if (resolutionNumbers.any { upper.contains(it) }) return false
+            
+            // 4. Есть и буквы, и цифры
             if (!upper.any { it.isDigit() }) return false
             if (!upper.any { it.isLetter() }) return false
-
-            // Диагональ должна быть 24-115
+            
+            // 5. ❗ КЛЮЧЕВОЕ: НЕТ буквы X или N между цифрами (это разрешение 3840x2160)
+            if (Regex("\\d[XxNn]\\d").containsMatchIn(upper)) return false
+            
+            // 6. ❗ КЛЮЧЕВОЕ: диагональ в начале должна быть 24–98
             val diagMatch = Regex("^(\\d{2,3})").find(upper)
             val diag = diagMatch?.groupValues?.get(1)?.toIntOrNull() ?: return false
-            if (diag < 24 || diag > 115) return false
-
-            // Не должно быть X между цифрами
-            if (Regex("\\d+[Xx]\\d+").containsMatchIn(upper)) return false
-
+            if (diag < 24 || diag > 98) return false
+            
+            // 7. Нет подряд 4+ цифр (это серийник или разрешение)
+            if (Regex("\\d{4,}").containsMatchIn(upper)) return false
+            
+            // 8. Не заканчивается на "MM" или "KG"
+            if (upper.endsWith("MM") || upper.endsWith("KG")) return false
+            
             return true
         }
 
@@ -92,33 +91,29 @@ object OcrHelper {
                 .trim()
         }
 
-        // === ПРИОРИТЕТ 1: QUANTUM ===
-        if (isQuantum) {
-            for (i in rawLines.indices) {
-                if (rawLines[i].contains("Quantum", ignoreCase = true)) {
-                    val sameLine = rawLines[i].replace("Quantum", "", ignoreCase = true)
-                        .replace("Квантум", "", ignoreCase = true).trim()
-                    val candidate = normalize(sameLine)
-                    if (isCleanModel(candidate)) return candidate
+        // Паттерн модели: 2-3 цифры (24-98) + буквы/цифры
+        val modelPattern = Pattern.compile(
+            "\\b(2[4-9]|[3-8]\\d|9[0-8])([A-Z]{1,6}\\d{0,5}[A-Z0-9]{0,8})\\b"
+        )
 
-                    if (i + 1 < rawLines.size) {
-                        val next = normalize(rawLines[i + 1])
-                        if (isCleanModel(next)) return next
-                    }
-                    if (i - 1 >= 0) {
-                        val prev = normalize(rawLines[i - 1])
-                        if (isCleanModel(prev)) return prev
-                    }
+        // === ПРИОРИТЕТ 1: QUANTUM ===
+        for (i in rawLines.indices) {
+            if (rawLines[i].contains("Quantum", ignoreCase = true)) {
+                val sameLine = normalize(rawLines[i].replace("Quantum", "", ignoreCase = true))
+                if (isCleanModel(sameLine)) return sameLine
+                if (i + 1 < rawLines.size) {
+                    val next = normalize(rawLines[i + 1])
+                    if (isCleanModel(next)) return next
                 }
             }
         }
 
-        // === ПРИОРИТЕТ 2: LG ===
+        // === ПРИОРИТЕТ 2: LG (игнорируем S/N) ===
+        val isLG = upperLines.any { it.contains("LG") || it.contains("ABYGLJU") }
         if (isLG) {
             for (line in rawLines) {
                 val upper = line.uppercase()
                 if (upper.contains("S/N") || upper.contains("SERIAL") || upper.contains("W/O")) continue
-
                 val cleaned = normalize(upper)
                 val m = modelPattern.matcher(cleaned)
                 if (m.find()) {
@@ -128,13 +123,12 @@ object OcrHelper {
             }
         }
 
-        // === ПРИОРИТЕТ 3: Строка после MODEL ===
+        // === ПРИОРИТЕТ 3: Строка после MODEL/МОДЕЛЬ ===
         for (i in rawLines.indices) {
             val upper = upperLines[i]
             if (upper == "MODEL" || upper.startsWith("MODEL ") || upper == "МОДЕЛЬ" || upper.startsWith("МОДЕЛЬ ")) {
                 val sameLine = normalize(upper.replace("MODEL", "").replace("МОДЕЛЬ", ""))
                 if (isCleanModel(sameLine)) return sameLine
-
                 if (i + 1 < rawLines.size) {
                     val next = normalize(rawLines[i + 1])
                     if (isCleanModel(next)) return next
@@ -147,7 +141,7 @@ object OcrHelper {
             "TCL", "SAMSUNG", "HISENSE", "SONY", "PHILIPS", "XIAOMI", "LG",
             "ROOME", "HAIER", "QUANTUM", "HORIZONT", "ВИТЯЗЬ", "ASANO",
             "HYUNDAI", "HARPER", "LEFF", "DREAME", "ЯНДЕКС", "KIVI", "FOX",
-            "EVO", "H", "MIDEA", "BQ", "TELEFUNKEN", "TOSHIBA", "PANASONIC"
+            "EVO", "MIDEA", "TOSHIBA", "PANASONIC", "H"
         )
         for (i in rawLines.indices) {
             if (brands.any { upperLines[i] == it || upperLines[i].startsWith("$it ") }) {
@@ -168,17 +162,15 @@ object OcrHelper {
             }
         }
 
-        // === ПРИОРИТЕТ 6: Любой паттерн в тексте ===
+        // === ПРИОРИТЕТ 6: Любой паттерн в тексте, самый длинный ===
         val allText = rawLines.joinToString(" ").uppercase()
         val m = modelPattern.matcher(allText)
-        var bestCandidate = ""
+        var best = ""
         while (m.find()) {
             val candidate = m.group(0)
-            if (isCleanModel(candidate)) {
-                if (candidate.length > bestCandidate.length) bestCandidate = candidate
-            }
+            if (isCleanModel(candidate) && candidate.length > best.length) best = candidate
         }
-        if (bestCandidate.isNotEmpty()) return bestCandidate
+        if (best.isNotEmpty()) return best
 
         return ""
     }
