@@ -26,39 +26,33 @@ object OcrHelper {
     fun extractModel(text: String): String {
         val rawLines = text.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
 
+        // Строки-шум (S/N, ТУ, напряжение и т.д.)
+        val noise = listOf(
+            "S/N", "S/NO", "SERIAL", "W/O", "VOLTAGE", "WEIGHT", "DIMENSIONS",
+            "ТУ BY", "TYBY", "ТУBY", "ИЗГОТОВИТЕЛЬ", "ИМПОРТЕР", "СДЕЛАНО",
+            "АДРЕС", "НАПРЯЖЕНИЕ", "ПИТАНИЕ", "ГАРАНТИЙНЫЙ", "СЕРВИСНЫЙ",
+            "ТЕЛЕВИЗОР", "ТЕЛЕДИДАР", "EAC", "HDMI", "USB", "WEBOS", "TIZEN"
+        )
+
         fun isNoise(line: String): Boolean {
             val u = line.uppercase()
-            return u.contains("S/N") || u.contains("S/NO") ||
-                   u.contains("SERIAL") || u.contains("W/O") ||
-                   u.contains("VOLTAGE") || u.contains("WEIGHT") ||
-                   u.contains("DIMENSIONS") || u.contains("DATE") ||
-                   u.contains("ТЕЛЕВИЗОР") || u.contains("ТЕЛЕДИДАР") ||
-                   u.contains("ИЗГОТОВИТЕЛЬ") || u.contains("ИМПОРТЕР") ||
-                   u.contains("ПРОИЗВОДИТЕЛЬ") || u.contains("СДЕЛАНО") ||
-                   u.contains("АДРЕС") || u.contains("ТЕЛ.") ||
-                   u.contains("НАПРЯЖЕНИЕ") || u.contains("ПИТАНИЕ") ||
-                   u.contains("ГАРАНТИЙНЫЙ") || u.contains("СЕРВИСНЫЙ") ||
-                   u.contains("КЛАСС") || u.contains("ЭНЕРГО") ||
-                   u.contains("СООТВЕТСТВИЕ") || u.contains("СЕРТИФИКАТ") ||
-                   u.contains("ДЕКЛАРАЦИЯ") || u.contains("СВИДЕТЕЛЬСТВО")
+            return noise.any { u.contains(it) }
         }
 
         fun isSerial(line: String): Boolean {
             val u = line.uppercase().replace(" ", "")
-            if (u.startsWith("TYBY") || u.startsWith("TY") || u.startsWith("ТУ")) return true
+            // 8+ цифр подряд — серийник
             if (Regex("\\d{8,}").containsMatchIn(u)) return true
+            // Начинается с TY/TУ — это ТУ
+            if (u.startsWith("TY") || u.startsWith("ТУ")) return true
+            // 15+ символов с 6+ цифрами
             if (u.length >= 15 && u.count { it.isDigit() } >= 6) return true
+            // Буквы + 6+ цифр
             if (Regex("[A-Z]{2,}\\d{6,}").containsMatchIn(u)) return true
             return false
         }
 
-        fun fixOcr(s: String): String {
-            var r = s.uppercase().replace(" ", "").substringBefore(".")
-            val m = Regex("^(\\d{2})(0)([A-Z].*)$").find(r)
-            if (m != null) r = m.groupValues[1] + "Q" + m.groupValues[3]
-            return r
-        }
-
+        // Модель: 2 цифры (24-98) + буквы/цифры, длина 4-15, без 4+ цифр подряд
         fun isCleanModel(s: String): Boolean {
             val upper = s.uppercase().trim()
             if (upper.length < 4 || upper.length > 15) return false
@@ -73,6 +67,14 @@ object OcrHelper {
             return true
         }
 
+        // Исправление OCR: 550NED → 55QNED
+        fun fixOcr(s: String): String {
+            var r = s.uppercase().replace(" ", "").substringBefore(".")
+            val m = Regex("^(\\d{2})(0)([A-Z].*)$").find(r)
+            if (m != null) r = m.groupValues[1] + "Q" + m.groupValues[3]
+            return r
+        }
+
         data class Candidate(val value: String, val priority: Int)
         val candidates = mutableListOf<Candidate>()
 
@@ -85,28 +87,26 @@ object OcrHelper {
                 .findAll(fixOcr(line))
 
             for (m in matches) {
-                val candidate = m.value
-                if (!isCleanModel(candidate)) continue
+                val c = m.value
+                if (!isCleanModel(c)) continue
 
-                val prevLine = if (i > 0) rawLines[i - 1].uppercase() else ""
-                val currUpper = line.uppercase()
+                val prev = if (i > 0) rawLines[i - 1].uppercase() else ""
+                val curr = line.uppercase()
 
                 var priority = 5
-                if (currUpper.contains("QUANTUM") && candidate.length in 5..10) priority = 1
-                else if (prevLine.contains("QUANTUM")) priority = 1
-                else if (currUpper.contains("MODEL") || prevLine.contains("MODEL") ||
-                         currUpper.contains("МОДЕЛЬ") || prevLine.contains("МОДЕЛЬ")) priority = 2
-                else if (prevLine.contains("W/O")) priority = 3
+                if (curr.contains("QUANTUM") && c.length in 5..10) priority = 1
+                else if (prev.contains("QUANTUM")) priority = 1
+                else if (curr.contains("MODEL") || prev.contains("MODEL") ||
+                         curr.contains("МОДЕЛЬ") || prev.contains("МОДЕЛЬ")) priority = 2
+                else if (prev.contains("W/O")) priority = 3
                 else if (i < 5) priority = 4
 
-                if (candidate.length in 5..10) priority -= 1
-
-                candidates.add(Candidate(candidate, priority))
+                if (c.length in 5..10) priority -= 1
+                candidates.add(Candidate(c, priority))
             }
         }
 
-        return candidates
-            .sortedWith(compareBy({ it.priority }, { it.value.length }))
+        return candidates.sortedWith(compareBy({ it.priority }, { it.value.length }))
             .firstOrNull()?.value ?: ""
     }
 }
