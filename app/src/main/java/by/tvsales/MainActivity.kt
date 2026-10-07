@@ -49,6 +49,8 @@ data class Sale(
     val services: List<ServiceItem> = emptyList()
 ) {
     val total: Double get() = price + accessories.sumOf { it.price } + services.sumOf { it.price }
+    val accessorySum: Double get() = accessories.sumOf { it.price }
+    val serviceSum: Double get() = services.sumOf { it.price }
 }
 
 val employees = listOf("Егор", "Максим", "Вова")
@@ -80,19 +82,11 @@ fun App() {
     Scaffold(
         topBar = {
             Box(
-                Modifier
-                    .fillMaxWidth()
-                    .background(LightLazuritePrimary)
-                    .statusBarsPadding()
+                Modifier.fillMaxWidth().background(LightLazuritePrimary).statusBarsPadding()
                     .padding(vertical = 16.dp, horizontal = 20.dp)
             ) {
-                Text(
-                    "ПАРСЕР ЖОРИЧА",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    modifier = Modifier.align(Alignment.Center)
-                )
+                Text("ПАРСЕР ЖОРИЧА", fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                    color = Color.White, modifier = Modifier.align(Alignment.Center))
             }
         },
         bottomBar = {
@@ -105,17 +99,9 @@ fun App() {
                     NavigationBarItem(
                         selected = tab == index,
                         onClick = { tab = index },
-                        icon = {
-                            Icon(icon, label,
-                                tint = if (tab == index) LightLazuritePrimary else LightLazuriteTextSecondary)
-                        },
-                        label = {
-                            Text(label,
-                                color = if (tab == index) LightLazuritePrimary else LightLazuriteTextSecondary)
-                        },
-                        colors = NavigationBarItemDefaults.colors(
-                            indicatorColor = LightLazuritePrimary.copy(alpha = 0.1f)
-                        )
+                        icon = { Icon(icon, label, tint = if (tab == index) LightLazuritePrimary else LightLazuriteTextSecondary) },
+                        label = { Text(label, color = if (tab == index) LightLazuritePrimary else LightLazuriteTextSecondary) },
+                        colors = NavigationBarItemDefaults.colors(indicatorColor = LightLazuritePrimary.copy(alpha = 0.1f))
                     )
                 }
             }
@@ -124,16 +110,8 @@ fun App() {
     ) { p ->
         Box(Modifier.padding(p)) {
             when (tab) {
-                0 -> ScanScreen(
-                    currentEmployee = currentEmployee,
-                    onEmployeeChange = { currentEmployee = it },
-                    onSaleAdded = { sales = sales + it; tab = 1 }
-                )
-                1 -> SalesScreen(
-                    sales = sales,
-                    onDelete = { sale -> sales = sales - sale },
-                    onUpdate = { old, new -> sales = sales.map { if (it == old) new else it } }
-                )
+                0 -> ScanScreen(currentEmployee, { currentEmployee = it }, { sales = sales + it; tab = 1 })
+                1 -> SalesScreen(sales, { sale -> sales = sales - sale }, { old, new -> sales = sales.map { if (it == old) new else it } })
                 2 -> SettingsScreen(sales)
             }
         }
@@ -142,56 +120,36 @@ fun App() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScanScreen(
-    currentEmployee: String,
-    onEmployeeChange: (String) -> Unit,
-    onSaleAdded: (Sale) -> Unit
-) {
+fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSaleAdded: (Sale) -> Unit) {
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
     var query by remember { mutableStateOf("") }
     var suggestions by remember { mutableStateOf(listOf<FiveElementProduct>()) }
     var selectedProduct by remember { mutableStateOf<FiveElementProduct?>(null) }
     var message by remember { mutableStateOf("Введите модель телевизора") }
-    var loading by remember { mutableStateOf(false) }
 
     LaunchedEffect(query) {
         if (query.length >= 3) {
             delay(600)
             suggestions = PriceRepository.searchTVs(query)
-        } else {
-            suggestions = emptyList()
-        }
+        } else suggestions = emptyList()
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
+    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // Выбор сотрудника
         var empExpanded by remember { mutableStateOf(false) }
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
-            elevation = CardDefaults.cardElevation(2.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
+        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
+            elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 Text("Кто продаёт?", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Spacer(Modifier.height(8.dp))
                 ExposedDropdownMenuBox(empExpanded, { empExpanded = !empExpanded }) {
-                    OutlinedTextField(
-                        value = currentEmployee, onValueChange = {}, readOnly = true,
+                    OutlinedTextField(value = currentEmployee, onValueChange = {}, readOnly = true,
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(empExpanded) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
+                        modifier = Modifier.menuAnchor().fillMaxWidth(), shape = RoundedCornerShape(12.dp))
                     ExposedDropdownMenu(empExpanded, { empExpanded = false }) {
                         employees.forEach { name ->
-                            DropdownMenuItem(text = { Text(name) },
-                                onClick = { onEmployeeChange(name); empExpanded = false })
+                            DropdownMenuItem(text = { Text(name) }, onClick = { onEmployeeChange(name); empExpanded = false })
                         }
                     }
                 }
@@ -199,32 +157,23 @@ fun ScanScreen(
         }
 
         // Поиск
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
-            elevation = CardDefaults.cardElevation(2.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
+        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
+            elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 Text("Модель телевизора", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it; selectedProduct = null; message = "Введите модель..." },
-                    label = { Text("Например: 55QLED780K") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    singleLine = true,
+                    value = query, onValueChange = { query = it; selectedProduct = null; message = "Введите модель..." },
+                    label = { Text("Например: 55QLED780K") }, modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp), singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = {
                         keyboard?.hide()
                         scope.launch { suggestions = PriceRepository.searchTVs(query) }
                     }),
                     trailingIcon = {
-                        if (query.isNotEmpty()) {
-                            IconButton(onClick = { query = ""; suggestions = emptyList() }) {
-                                Icon(Icons.Default.Clear, "Очистить")
-                            }
+                        if (query.isNotEmpty()) IconButton(onClick = { query = ""; suggestions = emptyList() }) {
+                            Icon(Icons.Default.Clear, "Очистить")
                         }
                     }
                 )
@@ -232,16 +181,13 @@ fun ScanScreen(
                     LazyColumn(Modifier.fillMaxWidth().heightIn(max = 250.dp).padding(top = 8.dp)) {
                         items(suggestions.size) { index ->
                             val product = suggestions[index]
-                            Card(
-                                Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
-                                    keyboard?.hide()
-                                    selectedProduct = product
-                                    query = product.name
-                                    suggestions = emptyList()
-                                    message = "Выбрано: ${product.name}"
-                                },
-                                colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)
-                            ) {
+                            Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
+                                keyboard?.hide()
+                                selectedProduct = product
+                                query = product.name
+                                suggestions = emptyList()
+                                message = "Выбрано: ${product.name}"
+                            }, colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)) {
                                 Column(Modifier.padding(12.dp)) {
                                     Text(product.name, fontWeight = FontWeight.Medium, fontSize = 14.sp)
                                     Text("${product.price} BYN", color = LightLazuritePrimary, fontSize = 12.sp)
@@ -254,15 +200,10 @@ fun ScanScreen(
         }
 
         selectedProduct?.let { sp ->
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
-                elevation = CardDefaults.cardElevation(4.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
+                elevation = CardDefaults.cardElevation(4.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("Выбрано", fontWeight = FontWeight.Bold, fontSize = 14.sp,
-                        color = LightLazuriteTextSecondary)
+                    Text("Выбрано", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = LightLazuriteTextSecondary)
                     Text(sp.name, fontWeight = FontWeight.Medium, fontSize = 16.sp)
                     Text("${sp.price} BYN", color = LightLazuritePrimary, fontWeight = FontWeight.Bold)
                 }
@@ -277,11 +218,9 @@ fun ScanScreen(
                 query = ""; selectedProduct = null
             },
             enabled = selectedProduct != null,
-            modifier = Modifier.fillMaxWidth().height(56.dp),
-            shape = RoundedCornerShape(12.dp)
+            modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(12.dp)
         ) {
-            Icon(Icons.Default.Add, null)
-            Spacer(Modifier.width(8.dp))
+            Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp))
             Text("Добавить", fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
 
@@ -291,11 +230,7 @@ fun ScanScreen(
 }
 
 @Composable
-fun SalesScreen(
-    sales: List<Sale>,
-    onDelete: (Sale) -> Unit,
-    onUpdate: (Sale, Sale) -> Unit
-) {
+fun SalesScreen(sales: List<Sale>, onDelete: (Sale) -> Unit, onUpdate: (Sale, Sale) -> Unit) {
     var selectedSale by remember { mutableStateOf<Sale?>(null) }
 
     Column(Modifier.padding(16.dp)) {
@@ -304,31 +239,25 @@ fun SalesScreen(
         Text("Всего: ${"%.2f".format(sales.sumOf { it.total })} BYN",
             fontSize = 18.sp, color = LightLazuritePrimary, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(16.dp))
-        Text("Нажми на ТВ, чтобы добавить акс/сервис",
-            fontSize = 13.sp, color = LightLazuriteTextSecondary)
+        Text("Нажми на ТВ, чтобы добавить акс/сервис", fontSize = 13.sp, color = LightLazuriteTextSecondary)
         Spacer(Modifier.height(8.dp))
 
         val recent = sales.takeLast(5).reversed()
         if (recent.isEmpty()) {
-            Text("Пока нет продаж", color = LightLazuriteTextSecondary,
-                modifier = Modifier.padding(vertical = 16.dp))
+            Text("Пока нет продаж", color = LightLazuriteTextSecondary, modifier = Modifier.padding(vertical = 16.dp))
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(recent) { sale ->
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
+                    Card(shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
                         elevation = CardDefaults.cardElevation(1.dp),
-                        modifier = Modifier.fillMaxWidth().clickable { selectedSale = sale }
-                    ) {
-                        Row(Modifier.fillMaxWidth().padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
+                        modifier = Modifier.fillMaxWidth().clickable { selectedSale = sale }) {
+                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(sale.model, fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                                Text("${sale.total} BYN · ${sale.employee}",
-                                    fontSize = 12.sp, color = LightLazuriteTextSecondary)
+                                Text("${sale.total} BYN · ${sale.employee}", fontSize = 12.sp, color = LightLazuriteTextSecondary)
+                                // Показываем СУММЫ, а не количество
                                 if (sale.accessories.isNotEmpty() || sale.services.isNotEmpty()) {
-                                    Text("+ акс: ${sale.accessories.size} · сервис: ${sale.services.size}",
+                                    Text("+ акс: ${sale.accessorySum} BYN · сервис: ${sale.serviceSum} BYN",
                                         fontSize = 11.sp, color = LightLazuriteAccentGreen)
                                 }
                             }
@@ -343,21 +272,13 @@ fun SalesScreen(
     }
 
     selectedSale?.let { sale ->
-        AccessoryPanel(
-            sale = sale,
-            onDismiss = { selectedSale = null },
-            onSave = { updated -> onUpdate(sale, updated); selectedSale = null }
-        )
+        AccessoryPanel(sale, { selectedSale = null }, { updated -> onUpdate(sale, updated); selectedSale = null })
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AccessoryPanel(
-    sale: Sale,
-    onDismiss: () -> Unit,
-    onSave: (Sale) -> Unit
-) {
+fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
     val scope = rememberCoroutineScope()
     val accessories = remember { mutableStateListOf<AccessoryItem>().apply { addAll(sale.accessories) } }
     val services = remember { mutableStateListOf<ServiceItem>().apply { addAll(sale.services) } }
@@ -365,11 +286,9 @@ fun AccessoryPanel(
     var searchQuery by remember { mutableStateOf("") }
     var searchResults by remember { mutableStateOf(listOf<FiveElementProduct>()) }
     var searching by remember { mutableStateOf(false) }
-
     var warrantyOptions by remember { mutableStateOf(listOf<WarrantyOption>()) }
     var loadingWarranty by remember { mutableStateOf(false) }
 
-    // Загружаем гарантию при открытии
     LaunchedEffect(sale.productId) {
         if (sale.productId.isNotEmpty()) {
             loadingWarranty = true
@@ -382,123 +301,88 @@ fun AccessoryPanel(
         onDismissRequest = onDismiss,
         title = { Text("Акс и сервис: ${sale.model}", fontSize = 15.sp) },
         text = {
-            Column(
-                Modifier.fillMaxWidth().heightIn(max = 500.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // === АКСЕССУАРЫ ===
-                Text("🔊 Аксессуары", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        label = { Text("Панель, кронштейн...") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            searching = true
-                            scope.launch {
-                                searchResults = PriceRepository.searchAccessories(searchQuery)
-                                searching = false
+            Column(Modifier.fillMaxWidth().heightIn(max = 500.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+
+                // ===== СПИСОК ДОБАВЛЕННОГО СВЕРХУ =====
+                if (accessories.isNotEmpty() || services.isNotEmpty()) {
+                    Card(colors = CardDefaults.cardColors(containerColor = LightLazuritePrimary.copy(alpha = 0.05f))) {
+                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Добавлено:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = LightLazuritePrimary)
+                            accessories.forEachIndexed { i, acc ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("🔊 ${acc.name} · ${acc.price} BYN", Modifier.weight(1f), fontSize = 12.sp)
+                                    IconButton(onClick = { accessories.removeAt(i) }, modifier = Modifier.size(28.dp)) {
+                                        Icon(Icons.Default.Close, "Удалить", tint = LightLazuriteAccentRed, modifier = Modifier.size(16.dp))
+                                    }
+                                }
                             }
-                        },
-                        enabled = searchQuery.length >= 3 && !searching
-                    ) { Text("Найти") }
+                            services.forEachIndexed { i, svc ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("🎬 ${svc.name} · ${svc.price} BYN", Modifier.weight(1f), fontSize = 12.sp)
+                                    IconButton(onClick = { services.removeAt(i) }, modifier = Modifier.size(28.dp)) {
+                                        Icon(Icons.Default.Close, "Удалить", tint = LightLazuriteAccentRed, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                }
+
+                // ===== ПОИСК КРОНШТЕЙНОВ =====
+                Text("🔧 Поиск кронштейнов", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(value = searchQuery, onValueChange = { searchQuery = it },
+                        label = { Text("Кронштейн...") }, modifier = Modifier.weight(1f), singleLine = true)
+                    Spacer(Modifier.width(8.dp))
+                    Button(onClick = {
+                        searching = true
+                        scope.launch { searchResults = PriceRepository.searchBrackets(searchQuery); searching = false }
+                    }, enabled = searchQuery.length >= 3 && !searching) { Text("Найти") }
                 }
                 if (searching) CircularProgressIndicator(Modifier.size(24.dp))
                 searchResults.forEach { prod ->
-                    Card(
-                        Modifier.fillMaxWidth().clickable {
-                            accessories.add(AccessoryItem(prod.name, prod.price))
-                            searchResults = emptyList(); searchQuery = ""
-                        },
-                        colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)
-                    ) {
+                    Card(Modifier.fillMaxWidth().clickable {
+                        accessories.add(AccessoryItem(prod.name, prod.price))
+                        searchResults = emptyList(); searchQuery = ""
+                    }, colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)) {
                         Column(Modifier.padding(8.dp)) {
                             Text(prod.name, fontSize = 13.sp)
                             Text("${prod.price} BYN", color = LightLazuritePrimary, fontSize = 12.sp)
                         }
                     }
                 }
-                accessories.forEachIndexed { i, acc ->
-                    Card(colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)) {
-                        Row(Modifier.fillMaxWidth().padding(8.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Text("${acc.name} · ${acc.price} BYN",
-                                Modifier.weight(1f), fontSize = 13.sp)
-                            IconButton(onClick = { accessories.removeAt(i) }) {
-                                Icon(Icons.Default.Close, "Удалить", tint = LightLazuriteAccentRed)
-                            }
-                        }
-                    }
-                }
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
-                // === ДОП. ГАРАНТИЯ ===
+                // ===== ГАРАНТИЯ =====
                 Text("🛡️ Доп. гарантия", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                if (loadingWarranty) {
-                    CircularProgressIndicator(Modifier.size(20.dp))
-                } else if (warrantyOptions.isEmpty()) {
-                    Text("Гарантия для этой модели не найдена",
-                        fontSize = 12.sp, color = LightLazuriteTextSecondary)
-                } else {
-                    warrantyOptions.forEach { w ->
-                        Card(
-                            Modifier.fillMaxWidth().clickable {
-                                val name = "Доп. гарантия ${w.years} год(а)"
-                                if (services.none { it.name == name }) {
-                                    services.add(ServiceItem(name, w.price))
-                                }
-                            },
-                            colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)
-                        ) {
-                            Row(Modifier.fillMaxWidth().padding(8.dp),
-                                verticalAlignment = Alignment.CenterVertically) {
-                                Text("На ${w.years} год(а)",
-                                    Modifier.weight(1f), fontSize = 13.sp)
-                                Text("${w.price} BYN", color = LightLazuritePrimary, fontSize = 12.sp)
-                            }
+                if (loadingWarranty) CircularProgressIndicator(Modifier.size(20.dp))
+                else if (warrantyOptions.isEmpty()) Text("Гарантия не найдена", fontSize = 12.sp, color = LightLazuriteTextSecondary)
+                else warrantyOptions.forEach { w ->
+                    Card(Modifier.fillMaxWidth().clickable {
+                        val name = "Доп. гарантия ${w.years} год(а)"
+                        if (services.none { it.name == name }) services.add(ServiceItem(name, w.price))
+                    }, colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)) {
+                        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("На ${w.years} год(а)", Modifier.weight(1f), fontSize = 13.sp)
+                            Text("${w.price} BYN", color = LightLazuritePrimary, fontSize = 12.sp)
                         }
                     }
                 }
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
-                // === ВИДЕОСЕРВИСЫ ===
-                Text("🎬 Подписки на видеосервисы", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                // ===== ВИДЕОСЕРВИСЫ (сразу добавляются) =====
+                Text("🎬 Подписки", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 videoServices.forEach { svc ->
-                    Card(
-                        Modifier.fillMaxWidth().clickable {
-                            if (services.none { it.name == svc.name }) services.add(svc)
-                        },
-                        colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)
-                    ) {
-                        Row(Modifier.fillMaxWidth().padding(8.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
+                    Card(Modifier.fillMaxWidth().clickable {
+                        if (services.none { it.name == svc.name }) services.add(svc)
+                    }, colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)) {
+                        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(svc.name, Modifier.weight(1f), fontSize = 13.sp)
                             Text("${svc.price} BYN", color = LightLazuritePrimary, fontSize = 12.sp)
-                        }
-                    }
-                }
-
-                // Уже добавленные сервисы
-                if (services.isNotEmpty()) {
-                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                    Text("Выбрано:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    services.forEachIndexed { i, svc ->
-                        Card(colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)) {
-                            Row(Modifier.fillMaxWidth().padding(8.dp),
-                                verticalAlignment = Alignment.CenterVertically) {
-                                Text("${svc.name} · ${svc.price} BYN",
-                                    Modifier.weight(1f), fontSize = 13.sp)
-                                IconButton(onClick = { services.removeAt(i) }) {
-                                    Icon(Icons.Default.Close, "Удалить", tint = LightLazuriteAccentRed)
-                                }
-                            }
                         }
                     }
                 }
@@ -506,10 +390,7 @@ fun AccessoryPanel(
         },
         confirmButton = {
             Button(onClick = {
-                onSave(sale.copy(
-                    accessories = accessories.toList(),
-                    services = services.toList()
-                ))
+                onSave(sale.copy(accessories = accessories.toList(), services = services.toList()))
             }) { Text("Сохранить") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
@@ -523,19 +404,12 @@ fun SettingsScreen(sales: List<Sale>) {
     }
     var expandedEmployee by remember { mutableStateOf<String?>(null) }
 
-    Column(
-        Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
+    Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Настройки", fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
-        // === АККОРДЕОН ПЛАНОВ ===
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
-            elevation = CardDefaults.cardElevation(2.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
+        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
+            elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 Text("Планы на месяц", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Spacer(Modifier.height(12.dp))
@@ -546,44 +420,31 @@ fun SettingsScreen(sales: List<Sale>) {
                     val percent = if (plan > 0) (fact / plan * 100) else 0.0
                     val isExpanded = expandedEmployee == name
 
-                    Card(
-                        Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                            .clickable { expandedEmployee = if (isExpanded) null else name },
-                        colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)
-                    ) {
+                    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
+                        expandedEmployee = if (isExpanded) null else name
+                    }, colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)) {
                         Column(Modifier.padding(12.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text(name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    Text("$fact / $plan BYN",
-                                        fontSize = 12.sp, color = LightLazuriteTextSecondary)
+                                    Text("$fact / $plan BYN", fontSize = 12.sp, color = LightLazuriteTextSecondary)
                                 }
-                                Text("${"%.1f".format(percent)}%",
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (percent >= 100) LightLazuriteAccentGreen else LightLazuritePrimary,
-                                    fontSize = 16.sp)
-                                Icon(
-                                    if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                    null, tint = LightLazuriteTextSecondary
-                                )
+                                Text("${"%.1f".format(percent)}%", fontWeight = FontWeight.Bold,
+                                    color = if (percent >= 100) LightLazuriteAccentGreen else LightLazuritePrimary, fontSize = 16.sp)
+                                Icon(if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                    null, tint = LightLazuriteTextSecondary)
                             }
-
                             AnimatedVisibility(isExpanded) {
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Spacer(Modifier.height(8.dp))
                                     var input by remember { mutableStateOf(plan.toString()) }
-                                    OutlinedTextField(
-                                        value = input,
-                                        onValueChange = { input = it },
-                                        label = { Text("План BYN") },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                                    Button(
-                                        onClick = { input.toDoubleOrNull()?.let { plans = plans + (name to it) } },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        shape = RoundedCornerShape(8.dp)
-                                    ) { Text("Сохранить план") }
+                                    OutlinedTextField(value = input, onValueChange = { input = it },
+                                        label = { Text("План BYN") }, modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(8.dp))
+                                    Button(onClick = { input.toDoubleOrNull()?.let { plans = plans + (name to it) } },
+                                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
+                                        Text("Сохранить план")
+                                    }
                                 }
                             }
                         }
@@ -592,16 +453,11 @@ fun SettingsScreen(sales: List<Sale>) {
             }
         }
 
-        // === ИНФО ===
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
-            elevation = CardDefaults.cardElevation(2.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
+        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
+            elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                Text("Версия: 0.5.0", fontSize = 14.sp)
+                Text("Версия: 0.6.0", fontSize = 14.sp)
                 Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp)
                 Text("Источник: 5element.by (Diginetica)", fontSize = 14.sp)
             }
