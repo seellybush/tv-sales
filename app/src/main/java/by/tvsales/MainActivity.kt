@@ -20,13 +20,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.Canvas
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
@@ -39,6 +43,7 @@ val LightLazuriteText = Color(0xFF1A1A1A)
 val LightLazuriteTextSecondary = Color(0xFF6E6E6E)
 val LightLazuriteAccentGreen = Color(0xFF2ECC71)
 val LightLazuriteAccentRed = Color(0xFFE74C3C)
+val LightLazuriteOrange = Color(0xFFF39C12)
 
 data class Sale(
     val model: String,
@@ -52,6 +57,13 @@ data class Sale(
     val accessorySum: Double get() = accessories.sumOf { it.price }
     val serviceSum: Double get() = services.sumOf { it.price }
 }
+
+// Планы: товар / акс / сервис
+data class EmployeePlan(
+    val product: Double = 0.0,
+    val accessories: Double = 0.0,
+    val service: Double = 0.0
+)
 
 val employees = listOf("Егор", "Максим", "Вова")
 val money: NumberFormat = NumberFormat.getCurrencyInstance(Locale("be", "BY"))
@@ -78,6 +90,17 @@ fun App() {
     var tab by remember { mutableIntStateOf(0) }
     var sales by remember { mutableStateOf(listOf<Sale>()) }
     var currentEmployee by remember { mutableStateOf(employees.first()) }
+
+    // Планы: изначально у всех product=25000, accessories=17% (4250), service=7% (1750)
+    var plans by remember {
+        mutableStateOf(
+            mapOf(
+                "Егор" to EmployeePlan(25000.0, 25000.0 * 0.17, 25000.0 * 0.07),
+                "Максим" to EmployeePlan(22000.0, 22000.0 * 0.17, 22000.0 * 0.07),
+                "Вова" to EmployeePlan(20000.0, 20000.0 * 0.17, 20000.0 * 0.07)
+            )
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -112,7 +135,7 @@ fun App() {
             when (tab) {
                 0 -> ScanScreen(currentEmployee, { currentEmployee = it }, { sales = sales + it; tab = 1 })
                 1 -> SalesScreen(sales, { sale -> sales = sales - sale }, { old, new -> sales = sales.map { if (it == old) new else it } })
-                2 -> SettingsScreen(sales)
+                2 -> SettingsScreen(sales, plans, { newPlans -> plans = newPlans })
             }
         }
     }
@@ -129,14 +152,10 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
     var message by remember { mutableStateOf("Введите модель телевизора") }
 
     LaunchedEffect(query) {
-        if (query.length >= 3) {
-            delay(600)
-            suggestions = PriceRepository.searchTVs(query)
-        } else suggestions = emptyList()
+        if (query.length >= 3) { delay(600); suggestions = PriceRepository.searchTVs(query) } else suggestions = emptyList()
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        // Выбор сотрудника
         var empExpanded by remember { mutableStateOf(false) }
         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
@@ -156,7 +175,6 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
             }
         }
 
-        // Поиск
         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
@@ -168,8 +186,7 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
                     shape = RoundedCornerShape(12.dp), singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = {
-                        keyboard?.hide()
-                        scope.launch { suggestions = PriceRepository.searchTVs(query) }
+                        keyboard?.hide(); scope.launch { suggestions = PriceRepository.searchTVs(query) }
                     }),
                     trailingIcon = {
                         if (query.isNotEmpty()) IconButton(onClick = { query = ""; suggestions = emptyList() }) {
@@ -182,11 +199,8 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
                         items(suggestions.size) { index ->
                             val product = suggestions[index]
                             Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
-                                keyboard?.hide()
-                                selectedProduct = product
-                                query = product.name
-                                suggestions = emptyList()
-                                message = "Выбрано: ${product.name}"
+                                keyboard?.hide(); selectedProduct = product; query = product.name
+                                suggestions = emptyList(); message = "Выбрано: ${product.name}"
                             }, colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)) {
                                 Column(Modifier.padding(12.dp)) {
                                     Text(product.name, fontWeight = FontWeight.Medium, fontSize = 14.sp)
@@ -255,7 +269,6 @@ fun SalesScreen(sales: List<Sale>, onDelete: (Sale) -> Unit, onUpdate: (Sale, Sa
                             Column(Modifier.weight(1f)) {
                                 Text(sale.model, fontWeight = FontWeight.Medium, fontSize = 14.sp)
                                 Text("${sale.total} BYN · ${sale.employee}", fontSize = 12.sp, color = LightLazuriteTextSecondary)
-                                // Показываем СУММЫ, а не количество
                                 if (sale.accessories.isNotEmpty() || sale.services.isNotEmpty()) {
                                     Text("+ акс: ${sale.accessorySum} BYN · сервис: ${sale.serviceSum} BYN",
                                         fontSize = 11.sp, color = LightLazuriteAccentGreen)
@@ -282,7 +295,6 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
     val scope = rememberCoroutineScope()
     val accessories = remember { mutableStateListOf<AccessoryItem>().apply { addAll(sale.accessories) } }
     val services = remember { mutableStateListOf<ServiceItem>().apply { addAll(sale.services) } }
-
     var searchQuery by remember { mutableStateOf("") }
     var searchResults by remember { mutableStateOf(listOf<FiveElementProduct>()) }
     var searching by remember { mutableStateOf(false) }
@@ -304,7 +316,6 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
             Column(Modifier.fillMaxWidth().heightIn(max = 500.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
 
-                // ===== СПИСОК ДОБАВЛЕННОГО СВЕРХУ =====
                 if (accessories.isNotEmpty() || services.isNotEmpty()) {
                     Card(colors = CardDefaults.cardColors(containerColor = LightLazuritePrimary.copy(alpha = 0.05f))) {
                         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -330,7 +341,6 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 }
 
-                // ===== ПОИСК КРОНШТЕЙНОВ =====
                 Text("🔧 Поиск кронштейнов", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(value = searchQuery, onValueChange = { searchQuery = it },
@@ -356,7 +366,6 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
-                // ===== ГАРАНТИЯ =====
                 Text("🛡️ Доп. гарантия", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 if (loadingWarranty) CircularProgressIndicator(Modifier.size(20.dp))
                 else if (warrantyOptions.isEmpty()) Text("Гарантия не найдена", fontSize = 12.sp, color = LightLazuriteTextSecondary)
@@ -374,7 +383,6 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
-                // ===== ВИДЕОСЕРВИСЫ (сразу добавляются) =====
                 Text("🎬 Подписки", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 videoServices.forEach { svc ->
                     Card(Modifier.fillMaxWidth().clickable {
@@ -397,58 +405,96 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
     )
 }
 
+// ===== НАСТРОЙКИ С КРАСИВЫМИ КРУГОВЫМИ ПРОГРЕССАМИ =====
 @Composable
-fun SettingsScreen(sales: List<Sale>) {
-    var plans by remember {
-        mutableStateOf(mapOf("Егор" to 25000.0, "Максим" to 22000.0, "Вова" to 20000.0))
-    }
-    var expandedEmployee by remember { mutableStateOf<String?>(null) }
+fun SettingsScreen(
+    sales: List<Sale>,
+    plans: Map<String, EmployeePlan>,
+    onPlansChange: (Map<String, EmployeePlan>) -> Unit
+) {
+    var selectedEmployee by remember { mutableStateOf<String?>(null) }
 
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Настройки", fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
-        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
-            elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
-                Text("Планы на месяц", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                Spacer(Modifier.height(12.dp))
+        Text("Результат сотрудника", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        HorizontalDivider(Modifier.padding(vertical = 4.dp))
 
-                employees.forEach { name ->
-                    val fact = sales.filter { it.employee == name }.sumOf { it.total }
-                    val plan = plans[name] ?: 0.0
-                    val percent = if (plan > 0) (fact / plan * 100) else 0.0
-                    val isExpanded = expandedEmployee == name
+        employees.forEach { name ->
+            val employeeSales = sales.filter { it.employee == name }
+            val factProduct = employeeSales.sumOf { it.price }
+            val factAccessories = employeeSales.sumOf { it.accessorySum }
+            val factService = employeeSales.sumOf { it.serviceSum }
 
-                    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
-                        expandedEmployee = if (isExpanded) null else name
-                    }, colors = CardDefaults.cardColors(containerColor = LightLazuriteBg)) {
-                        Column(Modifier.padding(12.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    Text("$fact / $plan BYN", fontSize = 12.sp, color = LightLazuriteTextSecondary)
-                                }
-                                Text("${"%.1f".format(percent)}%", fontWeight = FontWeight.Bold,
-                                    color = if (percent >= 100) LightLazuriteAccentGreen else LightLazuritePrimary, fontSize = 16.sp)
-                                Icon(if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                    null, tint = LightLazuriteTextSecondary)
-                            }
-                            AnimatedVisibility(isExpanded) {
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Spacer(Modifier.height(8.dp))
-                                    var input by remember { mutableStateOf(plan.toString()) }
-                                    OutlinedTextField(value = input, onValueChange = { input = it },
-                                        label = { Text("План BYN") }, modifier = Modifier.fillMaxWidth(),
-                                        shape = RoundedCornerShape(8.dp))
-                                    Button(onClick = { input.toDoubleOrNull()?.let { plans = plans + (name to it) } },
-                                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
-                                        Text("Сохранить план")
-                                    }
-                                }
-                            }
+            val plan = plans[name] ?: EmployeePlan()
+
+            // Автоматический расчёт: если план акс/сервис = 0, считаем 17% / 7% от факта товара
+            val planAccessories = if (plan.accessories > 0) plan.accessories else plan.product * 0.17
+            val planService = if (plan.service > 0) plan.service else plan.product * 0.07
+
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = LightLazuriteCard),
+                elevation = CardDefaults.cardElevation(2.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(name, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                        IconButton(onClick = {
+                            selectedEmployee = if (selectedEmployee == name) null else name
+                        }) {
+                            Icon(
+                                if (selectedEmployee == name) Icons.Default.KeyboardArrowUp else Icons.Default.Edit,
+                                "Редактировать план",
+                                tint = LightLazuritePrimary
+                            )
                         }
                     }
+
+                    // Если карточка раскрыта — показываем поля для редактирования плана
+                    AnimatedVisibility(selectedEmployee == name) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Spacer(Modifier.height(4.dp))
+                            var productInput by remember(name) { mutableStateOf(plan.product.toString()) }
+                            var accInput by remember(name) { mutableStateOf(planAccessories.toString()) }
+                            var srvInput by remember(name) { mutableStateOf(planService.toString()) }
+
+                            OutlinedTextField(value = productInput, onValueChange = { productInput = it },
+                                label = { Text("План товар, BYN") }, modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp))
+                            OutlinedTextField(value = accInput, onValueChange = { accInput = it },
+                                label = { Text("План аксессуары, BYN") }, modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp))
+                            OutlinedTextField(value = srvInput, onValueChange = { srvInput = it },
+                                label = { Text("План доп. сервис, BYN") }, modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp))
+                            Button(
+                                onClick = {
+                                    val p = productInput.toDoubleOrNull() ?: plan.product
+                                    val a = accInput.toDoubleOrNull() ?: planAccessories
+                                    val s = srvInput.toDoubleOrNull() ?: planService
+                                    onPlansChange(plans + (name to EmployeePlan(p, a, s)))
+                                    selectedEmployee = null
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp)
+                            ) { Text("Сохранить") }
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    // === ТРИ БЛОКА С КРУГАМИ ===
+                    MetricRow("Товар", factProduct, plan.product, LightLazuriteOrange)
+                    Spacer(Modifier.height(12.dp))
+                    HorizontalDivider()
+                    Spacer(Modifier.height(12.dp))
+                    MetricRow("Аксессуары", factAccessories, planAccessories, LightLazuriteOrange)
+                    Spacer(Modifier.height(12.dp))
+                    HorizontalDivider()
+                    Spacer(Modifier.height(12.dp))
+                    MetricRow("Доп. сервис", factService, planService, LightLazuriteAccentGreen)
                 }
             }
         }
@@ -457,10 +503,70 @@ fun SettingsScreen(sales: List<Sale>) {
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                Text("Версия: 0.6.0", fontSize = 14.sp)
+                Text("Версия: 0.7.0", fontSize = 14.sp)
                 Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp)
                 Text("Источник: 5element.by (Diginetica)", fontSize = 14.sp)
             }
         }
+    }
+}
+
+@Composable
+fun MetricRow(title: String, fact: Double, plan: Double, color: Color) {
+    val percent = if (plan > 0) (fact / plan * 100).coerceAtMost(999.0) else 0.0
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
+            Text("Результат", fontSize = 12.sp, color = LightLazuriteTextSecondary)
+            Text(
+                "%.0f".format(fact),
+                fontSize = 20.sp,
+                color = color,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        CircularProgress(
+            percent = percent,
+            color = color,
+            modifier = Modifier.size(110.dp)
+        )
+    }
+}
+
+@Composable
+fun CircularProgress(percent: Double, color: Color, modifier: Modifier = Modifier) {
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val stroke = 14.dp.toPx()
+            val size = this.size.minDimension - stroke
+            // Фон
+            drawArc(
+                color = Color(0xFFE8EAF0),
+                startAngle = -90f,
+                sweepAngle = 360f,
+                useCenter = false,
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+                topLeft = androidx.compose.ui.geometry.Offset(stroke / 2, stroke / 2),
+                size = androidx.compose.ui.geometry.Size(size, size)
+            )
+            // Прогресс
+            val sweep = (percent / 100.0 * 360.0).coerceAtMost(360.0).toFloat()
+            drawArc(
+                color = color,
+                startAngle = -90f,
+                sweepAngle = sweep,
+                useCenter = false,
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+                topLeft = androidx.compose.ui.geometry.Offset(stroke / 2, stroke / 2),
+                size = androidx.compose.ui.geometry.Size(size, size)
+            )
+        }
+        Text(
+            "%.2f%%".format(percent),
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            color = LightLazuriteText
+        )
     }
 }
