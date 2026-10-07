@@ -12,8 +12,8 @@ android {
         applicationId = "by.tvsales"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "1.7.0"
+        versionCode = 8
+versionName = "1.8.0"
     }
     buildFeatures { compose = true }
     compileOptions {
