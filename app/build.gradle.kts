@@ -12,8 +12,8 @@ android {
         applicationId = "by.tvsales"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.5.0"
+        versionCode = 6
+        versionName = "1.6.0"
     }
     buildFeatures { compose = true }
     compileOptions {
@@ -37,6 +37,13 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
-    // ML Kit — распознавание текста с фото
+    // ML Kit — распознавание текста
     implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.0")
+
+    // CameraX — камера в реальном времени
+    val cameraxVersion = "1.4.1"
+    implementation("androidx.camera:camera-core:$cameraxVersion")
+    implementation("androidx.camera:camera-camera2:$cameraxVersion")
+    implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
+    implementation("androidx.camera:camera-view:$cameraxVersion")
 }
