@@ -26,7 +26,6 @@ object OcrHelper {
     fun extractModel(text: String): String {
         val rawLines = text.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
 
-        // === 🚫 СТРОКИ-ШУМ ===
         fun isNoise(line: String): Boolean {
             val u = line.uppercase()
             return u.contains("S/N") || u.contains("S/NO") ||
@@ -44,53 +43,36 @@ object OcrHelper {
                    u.contains("ДЕКЛАРАЦИЯ") || u.contains("СВИДЕТЕЛЬСТВО")
         }
 
-        // === 🚫 СЕРИЙНИК / ТУ ===
         fun isSerial(line: String): Boolean {
             val u = line.uppercase().replace(" ", "")
-            // ТУ / TY
             if (u.startsWith("TYBY") || u.startsWith("TY") || u.startsWith("ТУ")) return true
-            // 8+ цифр подряд
             if (Regex("\\d{8,}").containsMatchIn(u)) return true
-            // Длина 15+ с 6+ цифрами
             if (u.length >= 15 && u.count { it.isDigit() } >= 6) return true
-            // Буквы + 6+ цифр
             if (Regex("[A-Z]{2,}\\d{6,}").containsMatchIn(u)) return true
-            // LG-стиль: буквы+цифры без чёткой диагонали в начале
-            // Например: 609RADC65786 — начинается с 60, но 60 — не диагональ LG
             return false
         }
 
-        // === 🔧 Исправление OCR ===
         fun fixOcr(s: String): String {
             var r = s.uppercase().replace(" ", "").substringBefore(".")
-            // 550NED → 55QNED
             val m = Regex("^(\\d{2})(0)([A-Z].*)$").find(r)
             if (m != null) r = m.groupValues[1] + "Q" + m.groupValues[3]
             return r
         }
 
-        // === ✅ ПРОВЕРКА МОДЕЛИ ===
         fun isCleanModel(s: String): Boolean {
             val upper = s.uppercase().trim()
-            // Длина 4–15
             if (upper.length < 4 || upper.length > 15) return false
-            // Буквы и цифры
             if (!upper.any { it.isDigit() }) return false
             if (!upper.any { it.isLetter() }) return false
-            // Начинается с диагонали 24–98
             val diag = Regex("^(\\d{2,3})").find(upper)?.groupValues?.get(1)?.toIntOrNull() ?: return false
             if (diag < 24 || diag > 98) return false
-            // Нет 4+ цифр подряд
             if (Regex("\\d{4,}").containsMatchIn(upper)) return false
-            // Нет X/N между цифрами
             if (Regex("\\d[XxNn]\\d").containsMatchIn(upper)) return false
-            // Не заканчивается на MM/KG/HZ/V
             if (upper.endsWith("MM") || upper.endsWith("KG") ||
                 upper.endsWith("HZ") || upper.endsWith("V")) return false
             return true
         }
 
-        // === 🎯 СБОР КАНДИДАТОВ С ПРИОРИТЕТОМ ===
         data class Candidate(val value: String, val priority: Int)
         val candidates = mutableListOf<Candidate>()
 
