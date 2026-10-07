@@ -2,7 +2,6 @@ package by.tvsales
 
 import android.content.Context
 import android.net.Uri
-import com.google.mlkit.vision.common.ImageInput
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
