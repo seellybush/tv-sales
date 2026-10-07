@@ -10,12 +10,10 @@ import kotlin.coroutines.resume
 
 object OcrHelper {
 
-    // Реальные диагонали ТВ
     private val validDiagonals = setOf(
         24, 28, 32, 39, 40, 42, 43, 48, 50, 55, 58, 60, 65, 70, 75, 77, 83, 85, 98, 100, 115
     )
 
-    // Все бренды с 5element.by
     private val brands = listOf(
         "SAMSUNG", "LG", "TCL", "SONY", "HISENSE", "PHILIPS", "XIAOMI",
         "HAIER", "SKYWORTH", "HORIZONT", "ГОРИЗОНТ", "ВИТЯЗЬ", "VITEBSK",
@@ -24,7 +22,6 @@ object OcrHelper {
         "JVC", "THOMSON", "KIVI", "BQ", "ЯНДЕКС", "YANDEX", "POLAR"
     )
 
-    // Слова-шум (НЕ модель)
     private val noiseWords = listOf(
         "S/N", "S/NO", "SERIAL", "W/O", "VOLTAGE", "WEIGHT", "DIMENSIONS",
         "ТУ BY", "TYBY", "ТУBY", "ИЗГОТОВИТЕЛЬ", "ИМПОРТЕР", "СДЕЛАНО",
@@ -83,15 +80,11 @@ object OcrHelper {
 
         fun fixOcr(s: String): String {
             var r = s.uppercase().replace(" ", "").substringBefore(".")
-            // 550NED → 55QNED (Q→0)
             val m = Regex("^(\\d{2})(0)([A-Z].*)$").find(r)
             if (m != null) r = m.groupValues[1] + "Q" + m.groupValues[3]
-            // SSQNED → 55QNED (S→5)
-            r = r.replace(Regex("^([4-9])S([A-Z])"), "$1" + "5" + "$2")
             return r
         }
 
-        // Паттерн модели: реальная диагональ + буквы/цифры
         val modelPattern = Regex(
             "(2[48]|3[29]|4[0238]|50|5[058]|60|65|70|75|77|83|85|98|100|115)([A-Z]{1,8}\\d{0,5}[A-Z0-9]{0,8})"
         )
@@ -115,26 +108,16 @@ object OcrHelper {
                 val curr = line.uppercase()
 
                 var priority = 5
-
-                // QUANTUM
                 if (curr.contains("QUANTUM") && c.length in 5..10) priority = 1
                 else if (prev.contains("QUANTUM")) priority = 1
-                // DREAME: "Aura 65S100", "Vivid 50Q100"
                 else if (curr.contains("AURA") || curr.contains("VIVID")) priority = 1
-                // YANDEX
                 else if (curr.contains("YANDEX") || curr.contains("ЯНДЕКС")) priority = 1
                 else if (prev.contains("YANDEX") || prev.contains("ЯНДЕКС")) priority = 1
-                // MODEL/МОДЕЛЬ
                 else if (curr.contains("MODEL") || prev.contains("MODEL") ||
                          curr.contains("МОДЕЛЬ") || prev.contains("МОДЕЛЬ")) priority = 2
-                // W/O (LG)
                 else if (prev.contains("W/O")) priority = 3
-                // Любой бренд
                 else if (brands.any { curr.contains(it) }) priority = 3
-                // Первые 5 строк
                 else if (i < 5) priority = 4
-
-                // Бонус за типичную длину
                 if (c.length in 5..10) priority -= 1
 
                 candidates.add(Candidate(c, priority))
@@ -143,5 +126,21 @@ object OcrHelper {
 
         return candidates.sortedWith(compareBy({ it.priority }, { it.value.length }))
             .firstOrNull()?.value ?: ""
+    }
+
+    // Варианты для поиска (OCR-ошибки: 8→B, 0→O, 1→L/I, 5→S, G→6)
+    fun generateSearchVariants(model: String): List<String> {
+        val variants = mutableListOf(model)
+        if (model.contains("8")) variants.add(model.replace("8", "B"))
+        if (model.contains("0")) variants.add(model.replace("0", "O"))
+        if (model.contains("O")) variants.add(model.replace("O", "0"))
+        if (model.endsWith("1")) variants.add(model.dropLast(1) + "L")
+        if (model.contains("1")) variants.add(model.replace("1", "I"))
+        if (model.contains("5")) variants.add(model.replace("5", "S"))
+        if (model.contains("S")) variants.add(model.replace("S", "5"))
+        if (model.contains("G")) variants.add(model.replace("G", "6"))
+        if (model.contains("B")) variants.add(model.replace("B", "8"))
+        if (model.endsWith("8")) variants.add(model.dropLast(1) + "B")
+        return variants.distinct()
     }
 }
