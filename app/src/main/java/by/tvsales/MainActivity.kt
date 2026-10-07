@@ -1,6 +1,5 @@
 package by.tvsales
 
-import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -55,7 +54,6 @@ val moneyFormat: NumberFormat = NumberFormat.getNumberInstance(Locale("be", "BY"
     minimumFractionDigits = 2
     maximumFractionDigits = 2
 }
-val intFormat: NumberFormat = NumberFormat.getIntegerInstance(Locale("be", "BY"))
 
 data class Sale(
     val model: String,
@@ -108,38 +106,6 @@ fun App() {
                 "Максим" to EmployeePlan(22000.0, 22000.0 * 0.17, 22000.0 * 0.07),
                 "Вова" to EmployeePlan(20000.0, 20000.0 * 0.17, 20000.0 * 0.07)
             )
-        )
-    }
-
-    // === Проверка обновлений при старте ===
-    val context = LocalContext.current
-    var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
-
-    LaunchedEffect(Unit) {
-        updateInfo = UpdateChecker.checkForUpdates()
-    }
-
-    updateInfo?.let { info ->
-        AlertDialog(
-            onDismissRequest = { updateInfo = null },
-            title = { Text("Доступно обновление", fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    Text("Новая версия: ${info.version}")
-                    Spacer(Modifier.height(8.dp))
-                    Text(info.releaseNotes, fontSize = 13.sp, color = TvStatsTextSecondary)
-                }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(info.downloadUrl))
-                    context.startActivity(intent)
-                    updateInfo = null
-                }) { Text("Скачать") }
-            },
-            dismissButton = {
-                TextButton(onClick = { updateInfo = null }) { Text("Позже") }
-            }
         )
     }
 
@@ -208,8 +174,7 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
                     suggestions = PriceRepository.searchTVs(model)
                     message = "Распознано: $model"
                 } else {
-                    // Показываем первые 200 символов OCR для отладки
-                    message = "OCR: ${text.replace("\n", " ").take(200)}"
+                    message = "Не удалось распознать модель. Введите вручную."
                 }
             }
         }
@@ -694,7 +659,7 @@ fun SettingsScreen(
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
-                Text("Версия: 1.7.0", fontSize = 14.sp, color = TvStatsTextSecondary)
+                Text("Версия: 1.8.0", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Разработчик: Матранг", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Источник: 5element.by", fontSize = 14.sp, color = TvStatsTextSecondary)
