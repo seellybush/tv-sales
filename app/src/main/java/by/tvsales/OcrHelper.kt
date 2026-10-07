@@ -22,16 +22,6 @@ object OcrHelper {
         "JVC", "THOMSON", "KIVI", "BQ", "ЯНДЕКС", "YANDEX", "POLAR"
     )
 
-    private val noiseWords = listOf(
-        "S/N", "S/NO", "SERIAL", "W/O", "VOLTAGE", "WEIGHT", "DIMENSIONS",
-        "ТУ BY", "TYBY", "ТУBY", "ИЗГОТОВИТЕЛЬ", "ИМПОРТЕР", "СДЕЛАНО",
-        "АДРЕС", "НАПРЯЖЕНИЕ", "ПИТАНИЕ", "ГАРАНТИЙНЫЙ", "СЕРВИСНЫЙ",
-        "ТЕЛЕВИЗОР", "ТЕЛЕДИДАР", "EAC", "HDMI", "USB", "WEBOS", "TIZEN",
-        "ANDROID", "GOOGLE", "SMART", "LED", "QLED", "ULED", "HQLED",
-        "NANOCELL", "OLED", "MINILED", "DIRECT", "FULL", "ULTRA", "HD",
-        "PIX", "ПИКС", "СМ", "ДЮЙМ", "HZ", "ВТ"
-    )
-
     suspend fun recognizeText(context: Context, imageUri: Uri): String =
         suspendCancellableCoroutine { continuation ->
             try {
@@ -48,17 +38,22 @@ object OcrHelper {
     fun extractModel(text: String): String {
         val rawLines = text.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
 
-        fun isNoise(line: String): Boolean {
-            val u = line.uppercase()
-            return noiseWords.any { u.contains(it) }
-        }
+        val noiseWords = listOf(
+            "CARTON", "NO:", "VOLTAGE", "WEIGHT", "NET", "GROSS",
+            "DIMENSIONS", "S/N", "S/NO", "SERIAL", "W/O", "DATE",
+            "ТУ BY", "TYBY", "ТУBY", "ИЗГОТОВИТЕЛЬ", "ИМПОРТЕР", "СДЕЛАНО",
+            "АДРЕС", "НАПРЯЖЕНИЕ", "ПИТАНИЕ", "ГАРАНТИЙНЫЙ", "СЕРВИСНЫЙ",
+            "ТЕЛЕВИЗОР", "ТЕЛЕДИДАР", "EAC", "HDMI", "USB", "WEBOS", "TIZEN",
+            "ANDROID", "GOOGLE", "SMART", "SERIES", "MODEL", "МОДЕЛЬ",
+            "КГ", "ММ", "ВТ", "HZ", "PIX", "ПИКС", "LED", "QLED", "ULED",
+            "HQLED", "NANOCELL", "OLED", "MINILED", "DIRECT", "FULL", "ULTRA"
+        )
 
-        fun isSerial(line: String): Boolean {
-            val u = line.uppercase().replace(" ", "")
+        fun isSerial(s: String): Boolean {
+            val u = s.uppercase().replace(" ", "")
             if (Regex("\\d{8,}").containsMatchIn(u)) return true
             if (u.startsWith("TY") || u.startsWith("ТУ")) return true
             if (u.length >= 15 && u.count { it.isDigit() } >= 6) return true
-            if (Regex("[A-Z]{2,}\\d{6,}").containsMatchIn(u)) return true
             return false
         }
 
@@ -85,6 +80,13 @@ object OcrHelper {
             return r
         }
 
+        // ❗ Разбиваем каждую строку на слова и ищем модель по каждому слову
+        val words = mutableListOf<String>()
+        for (line in rawLines) {
+            val cleaned = line.replace(":", " ").replace("|", " ").replace(",", " ")
+            words.addAll(cleaned.split(Regex("\\s+")).filter { it.isNotBlank() })
+        }
+
         val modelPattern = Regex(
             "(2[48]|3[29]|4[0238]|50|5[058]|60|65|70|75|77|83|85|98|100|115)([A-Z]{1,8}\\d{0,5}[A-Z0-9]{0,8})"
         )
@@ -92,34 +94,29 @@ object OcrHelper {
         data class Candidate(val value: String, val priority: Int)
         val candidates = mutableListOf<Candidate>()
 
-        for (i in rawLines.indices) {
-            val line = rawLines[i]
-            if (isNoise(line)) continue
-            if (isSerial(line)) continue
+        for (word in words) {
+            val u = word.uppercase()
+            if (noiseWords.any { u.contains(it) }) continue
+            if (isSerial(u)) continue
 
-            val fixed = fixOcr(line)
+            val fixed = fixOcr(u)
             val matches = modelPattern.findAll(fixed)
 
             for (m in matches) {
                 val c = m.value
                 if (!isCleanModel(c)) continue
 
-                val prev = if (i > 0) rawLines[i - 1].uppercase() else ""
-                val curr = line.uppercase()
-
                 var priority = 5
-                if (curr.contains("QUANTUM") && c.length in 5..10) priority = 1
-                else if (prev.contains("QUANTUM")) priority = 1
-                else if (curr.contains("AURA") || curr.contains("VIVID")) priority = 1
-                else if (curr.contains("YANDEX") || curr.contains("ЯНДЕКС")) priority = 1
-                else if (prev.contains("YANDEX") || prev.contains("ЯНДЕКС")) priority = 1
-                else if (curr.contains("MODEL") || prev.contains("MODEL") ||
-                         curr.contains("МОДЕЛЬ") || prev.contains("МОДЕЛЬ")) priority = 2
-                else if (prev.contains("W/O")) priority = 3
-                else if (brands.any { curr.contains(it) }) priority = 3
-                else if (i < 5) priority = 4
-                if (c.length in 5..10) priority -= 1
+                val indexInText = text.uppercase().indexOf(u)
+                val before = if (indexInText > 0) text.uppercase().substring(0, indexInText) else ""
+                val lastWordBefore = before.split(Regex("\\s+")).lastOrNull { it.isNotBlank() }?.uppercase() ?: ""
 
+                if (lastWordBefore.contains("QUANTUM")) priority = 1
+                else if (lastWordBefore == "MODEL" || lastWordBefore == "МОДЕЛЬ") priority = 1
+                else if (brands.any { lastWordBefore.contains(it) }) priority = 2
+                else if (u.contains("QUANTUM")) priority = 1
+
+                if (c.length in 5..10) priority -= 1
                 candidates.add(Candidate(c, priority))
             }
         }
@@ -131,8 +128,6 @@ object OcrHelper {
     // Варианты для поиска (OCR-ошибки + усечение последнего символа)
     fun generateSearchVariants(model: String): List<String> {
         val variants = mutableListOf(model)
-
-        // OCR-замены
         if (model.contains("8")) variants.add(model.replace("8", "B"))
         if (model.contains("0")) variants.add(model.replace("0", "O"))
         if (model.contains("O")) variants.add(model.replace("O", "0"))
@@ -143,15 +138,8 @@ object OcrHelper {
         if (model.contains("G")) variants.add(model.replace("G", "6"))
         if (model.contains("B")) variants.add(model.replace("B", "8"))
         if (model.endsWith("8")) variants.add(model.dropLast(1) + "B")
-
-        // Усечение последнего символа (если OCR прочитал букву неверно)
-        if (model.length >= 6) {
-            variants.add(model.dropLast(1))
-        }
-        if (model.length >= 7) {
-            variants.add(model.dropLast(2))
-        }
-
+        if (model.length >= 6) variants.add(model.dropLast(1))
+        if (model.length >= 7) variants.add(model.dropLast(2))
         return variants.distinct()
     }
 }
