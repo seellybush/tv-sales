@@ -1,6 +1,8 @@
 package by.tvsales
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -39,14 +41,14 @@ data class FiveElementProduct(
     val price: Double = 0.0,
     val oldPrice: Double? = null,
     val diagonal: String = "",
-    val url: String = ""
+    val url: String = "",
+    val vesa: String = ""   // ← VESA (для ТВ и кронштейнов)
 )
 
 data class AccessoryItem(val name: String, val price: Double)
 data class ServiceItem(val name: String, val price: Double)
 data class WarrantyOption(val years: Int, val price: Double)
 
-// === ВИДЕОСЕРВИСЫ + Skipsy ===
 val videoServices = listOf(
     ServiceItem("iTV 6 мес", 89.90),
     ServiceItem("iTV 12 мес", 169.90),
@@ -120,7 +122,7 @@ object PriceRepository {
         }
     }
 
-    // 🔊 Поиск саундбаров с фильтром по цене
+    // 🔊 Поиск саундбаров (фильтр по цене в Kotlin)
     suspend fun searchSoundbars(
         query: String,
         priceFrom: Int? = null,
@@ -129,7 +131,7 @@ object PriceRepository {
         if (query.length < 2) return@withContext emptyList()
         try {
             val encoded = URLEncoder.encode(query, "UTF-8")
-            val urlBuilder = StringBuilder("$DIGINETICA_URL?st=$encoded" +
+            val url = "$DIGINETICA_URL?st=$encoded" +
                     "&apiKey=$DIGINETICA_API_KEY" +
                     "&strategy=advanced_xname%2Czero_queries" +
                     "&productsSize=50" +
@@ -137,11 +139,9 @@ object PriceRepository {
                     "&forIs=true" +
                     "&showUnavailable=true" +
                     "&withContent=false" +
-                    "&withSku=false")
-            if (priceFrom != null && priceFrom > 0) urlBuilder.append("&price_from=$priceFrom")
-            if (priceTo != null && priceTo > 0) urlBuilder.append("&price_to=$priceTo")
+                    "&withSku=false"
 
-            val req = Request.Builder().url(urlBuilder.toString())
+            val req = Request.Builder().url(url)
                 .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
                 .header("Accept", "application/json").build()
 
@@ -169,13 +169,15 @@ object PriceRepository {
                     )
                 }
                 .filter { it.price > 20 }
+                .filter { priceFrom == null || it.price >= priceFrom }
+                .filter { priceTo == null || it.price <= priceTo }
         } catch (e: Exception) {
             e.printStackTrace()
             emptyList()
         }
     }
 
-    // 🔧 Поиск кронштейнов с фильтром по цене
+    // 🔧 Поиск кронштейнов (фильтр по цене в Kotlin)
     suspend fun searchBrackets(
         query: String,
         priceFrom: Int? = null,
@@ -184,7 +186,7 @@ object PriceRepository {
         if (query.length < 2) return@withContext emptyList()
         try {
             val encoded = URLEncoder.encode(query, "UTF-8")
-            val urlBuilder = StringBuilder("$DIGINETICA_URL?st=$encoded" +
+            val url = "$DIGINETICA_URL?st=$encoded" +
                     "&apiKey=$DIGINETICA_API_KEY" +
                     "&strategy=advanced_xname%2Czero_queries" +
                     "&productsSize=50" +
@@ -192,11 +194,9 @@ object PriceRepository {
                     "&forIs=true" +
                     "&showUnavailable=true" +
                     "&withContent=false" +
-                    "&withSku=false")
-            if (priceFrom != null && priceFrom > 0) urlBuilder.append("&price_from=$priceFrom")
-            if (priceTo != null && priceTo > 0) urlBuilder.append("&price_to=$priceTo")
+                    "&withSku=false"
 
-            val req = Request.Builder().url(urlBuilder.toString())
+            val req = Request.Builder().url(url)
                 .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
                 .header("Accept", "application/json").build()
 
@@ -221,10 +221,54 @@ object PriceRepository {
                     )
                 }
                 .filter { it.price > 5 }
+                .filter { priceFrom == null || it.price >= priceFrom }
+                .filter { priceTo == null || it.price <= priceTo }
         } catch (e: Exception) {
             e.printStackTrace()
             emptyList()
         }
+    }
+
+    // 📐 Парсинг VESA с карточки товара (телевизор или кронштейн)
+    suspend fun fetchVesa(productUrl: String): String = withContext(Dispatchers.IO) {
+        if (productUrl.isEmpty()) return@withContext ""
+        try {
+            val req = Request.Builder().url(productUrl)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header("Accept", "text/html,application/xhtml+xml")
+                .header("Accept-Language", "ru-RU,ru;q=0.9")
+                .build()
+
+            val resp = client.newCall(req).execute()
+            if (!resp.isSuccessful) return@withContext ""
+            val html = resp.body?.string() ?: return@withContext ""
+
+            // Ищем "Крепление VESA | 300х200" или "Совместимость с креплением VESA | 100х100, 200х200, ..."
+            // Регулярка ищет VESA и захватывает всё до конца строки или тега
+            val pattern = Pattern.compile(
+                "(?:Крепление\\s+VESA|Совместимость\\s+с\\s+креплением\\s+VESA)\\s*[|:]?\\s*([^<\\n]+)",
+                Pattern.CASE_INSENSITIVE
+            )
+            val matcher = pattern.matcher(html)
+            if (matcher.find()) {
+                matcher.group(1)?.trim()?.replace("&nbsp;", " ") ?: ""
+            } else ""
+        } catch (e: Exception) {
+            e.printStackTrace()
+            ""
+        }
+    }
+
+    // 📐 Парсинг VESA кронштейнов для списка (параллельно)
+    suspend fun enrichBracketsWithVesa(
+        products: List<FiveElementProduct>
+    ): List<FiveElementProduct> = withContext(Dispatchers.IO) {
+        products.map { product ->
+            async {
+                val vesa = fetchVesa(product.url)
+                product.copy(vesa = vesa)
+            }
+        }.awaitAll()
     }
 
     suspend fun fetchWarrantyByUrl(productUrl: String): List<WarrantyOption> = withContext(Dispatchers.IO) {
