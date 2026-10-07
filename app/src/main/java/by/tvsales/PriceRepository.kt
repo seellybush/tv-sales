@@ -42,15 +42,34 @@ data class FiveElementProduct(
     val url: String = ""
 )
 
+// === Готовые списки аксессуаров и сервисов ===
+data class AccessoryItem(
+    val name: String,
+    val price: Double
+)
+
+data class ServiceItem(
+    val name: String,
+    val price: Double
+)
+
+// Видеосервисы — фиксированные цены (с 5element.by)
+val videoServices = listOf(
+    ServiceItem("iTV 6 мес", 89.90),
+    ServiceItem("iTV 12 мес", 169.90),
+    ServiceItem("iTV 24 мес", 349.90),
+    ServiceItem("iTV 36 мес", 499.90)
+    // Кинопоиск и Okko добавим позже, когда уточнишь цены
+)
+
 object PriceRepository {
     private val client = OkHttpClient()
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    // 🔑 Публичный API-ключ Diginetica (из запроса 5element.by)
     private const val DIGINETICA_API_KEY = "08IE0509XQ"
     private const val DIGINETICA_URL = "https://autocomplete.diginetica.net/autocomplete"
 
-    // 🔍 Поиск телевизоров через Diginetica (тот же поиск, что на 5element.by)
+    // 🔍 Поиск телевизоров (как было)
     suspend fun searchTVs(query: String): List<FiveElementProduct> = withContext(Dispatchers.IO) {
         if (query.length < 1) return@withContext emptyList()
         try {
@@ -58,7 +77,7 @@ object PriceRepository {
             val url = "$DIGINETICA_URL?st=$encoded" +
                     "&apiKey=$DIGINETICA_API_KEY" +
                     "&strategy=advanced_xname%2Czero_queries" +
-                    "&productsSize=50" +          // ← до 50 товаров
+                    "&productsSize=50" +
                     "&regionId=global" +
                     "&forIs=true" +
                     "&showUnavailable=true" +
@@ -67,7 +86,7 @@ object PriceRepository {
 
             val req = Request.Builder()
                 .url(url)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
                 .header("Accept", "application/json")
                 .build()
 
@@ -75,11 +94,8 @@ object PriceRepository {
             if (!resp.isSuccessful) return@withContext emptyList()
             val body = resp.body?.string() ?: return@withContext emptyList()
 
-            println("DIGINETICA_RESPONSE: $body")
-
             val parsed = json.decodeFromString<DigineticaResponse>(body)
 
-            // Фильтр: только телевизоры
             parsed.products
                 .filter { product ->
                     product.categories.any { it.name.contains("Телевизор", ignoreCase = true) }
@@ -94,14 +110,58 @@ object PriceRepository {
                         url = "https://5element.by${product.link_url}"
                     )
                 }
-                .filter { it.price > 50 }  // отсеиваем мусор
+                .filter { it.price > 50 }
         } catch (e: Exception) {
             e.printStackTrace()
             emptyList()
         }
     }
 
-    // 💰 Поиск цены конкретной модели — первый результат
+    // 🔍 Поиск аксессуаров (саундбары, кронштейны)
+    suspend fun searchAccessories(query: String): List<FiveElementProduct> = withContext(Dispatchers.IO) {
+        if (query.length < 1) return@withContext emptyList()
+        try {
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            val url = "$DIGINETICA_URL?st=$encoded" +
+                    "&apiKey=$DIGINETICA_API_KEY" +
+                    "&strategy=advanced_xname%2Czero_queries" +
+                    "&productsSize=30" +
+                    "&regionId=global" +
+                    "&forIs=true" +
+                    "&showUnavailable=true" +
+                    "&withContent=false" +
+                    "&withSku=false"
+
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                .header("Accept", "application/json")
+                .build()
+
+            val resp = client.newCall(req).execute()
+            if (!resp.isSuccessful) return@withContext emptyList()
+            val body = resp.body?.string() ?: return@withContext emptyList()
+
+            val parsed = json.decodeFromString<DigineticaResponse>(body)
+
+            // НЕ фильтруем по «Телевизор» — берём всё, что нашлось
+            parsed.products.map { product ->
+                FiveElementProduct(
+                    id = product.id,
+                    name = product.name,
+                    price = product.price.toDoubleOrNull() ?: 0.0,
+                    oldPrice = product.oldPrice?.toDoubleOrNull(),
+                    diagonal = "",
+                    url = "https://5element.by${product.link_url}"
+                )
+            }.filter { it.price > 10 }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emptyList()
+        }
+    }
+
+    // 💰 Поиск цены конкретной модели
     suspend fun findPrice(modelName: String): Pair<Double, String>? = withContext(Dispatchers.IO) {
         try {
             val products = searchTVs(modelName)
@@ -118,8 +178,6 @@ object PriceRepository {
 
     // 📐 Извлечение диагонали из названия
     private fun extractDiagonal(name: String): String {
-        // Ищем паттерн: 2-3 цифры, опционально перед буквами
-        // Примеры: "55QNED72B6B", "43QLED780K", "UE55M80HAUXPY" → 55
         val pattern = Regex("(\\d{2,3})(?:[A-Z]|\\s|$)")
         val match = pattern.find(name.uppercase())
         return match?.groupValues?.get(1) ?: ""
