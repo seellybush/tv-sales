@@ -164,7 +164,7 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
 
     fun hideKeyboard() {
         keyboard?.hide()
-        focusManager.clearFocus()
+        focusManager.clearFocus(force = true)
     }
 
     fun searchWithVariants(model: String) {
@@ -432,7 +432,7 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
 
     fun hideKeyboard() {
         keyboard?.hide()
-        focusManager.clearFocus()
+        focusManager.clearFocus(force = true)
     }
 
     fun doSearch() {
@@ -440,11 +440,13 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
         hideKeyboard()
         searching = true
         scope.launch {
+            delay(150)
             searchResults = if (searchMode == "bracket")
                 PriceRepository.searchBrackets(searchQuery)
             else
                 PriceRepository.searchSoundbars(searchQuery)
             searching = false
+            hideKeyboard()
         }
     }
 
@@ -482,7 +484,12 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 }
 
-                Text("🛡️ Расширенная гарантия", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsText)
+                // === ГАРАНТИЯ ===
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.VerifiedUser, null, tint = TvStatsPrimary, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Расширенная гарантия", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsText)
+                }
                 if (loadingWarranty) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(20.dp), color = TvStatsPrimary)
@@ -519,17 +526,28 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
-                Text("🔍 Поиск аксессуаров", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsText)
+                // === ПОИСК АКСЕССУАРОВ ===
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Build, null, tint = TvStatsPrimary, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Поиск аксессуаров", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsText)
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = searchMode == "bracket",
                         onClick = { searchMode = "bracket"; searchResults = emptyList() },
-                        label = { Text("Кронштейны") }
+                        label = { Text("Кронштейны") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Build, null, modifier = Modifier.size(16.dp))
+                        }
                     )
                     FilterChip(
                         selected = searchMode == "soundbar",
                         onClick = { searchMode = "soundbar"; searchResults = emptyList() },
-                        label = { Text("Саундбары") }
+                        label = { Text("Саундбары") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Speaker, null, modifier = Modifier.size(16.dp))
+                        }
                     )
                 }
 
@@ -540,7 +558,10 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { doSearch() })
+                    keyboardActions = KeyboardActions(onSearch = {
+                        hideKeyboard()
+                        doSearch()
+                    })
                 )
 
                 Button(
@@ -548,13 +569,15 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     enabled = searchQuery.length >= 3 && !searching,
                     colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary),
                     modifier = Modifier.fillMaxWidth()
-                ) { Text(if (searching) "Ищу..." else "Найти") }
-
-                if (searching) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.size(20.dp), color = TvStatsPrimary)
+                ) {
+                    if (searching) {
+                        CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
                         Spacer(Modifier.width(8.dp))
-                        Text("Ищу...", fontSize = 12.sp, color = TvStatsTextSecondary)
+                        Text("Ищу...")
+                    } else {
+                        Icon(Icons.Default.Search, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Найти")
                     }
                 }
 
@@ -574,7 +597,12 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
-                Text("🎬 Подписки и сервисы", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsText)
+                // === ПОДПИСКИ ===
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Subscriptions, null, tint = TvStatsPrimary, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Подписки и сервисы", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsText)
+                }
                 videoServices.forEach { svc ->
                     Card(Modifier.fillMaxWidth().clickable {
                         if (services.none { it.name == svc.name }) services.add(svc)
@@ -590,6 +618,7 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
         },
         confirmButton = {
             Button(onClick = {
+                hideKeyboard()
                 onSave(sale.copy(accessories = accessories.toList(), services = services.toList()))
             }, colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary)) { Text("Сохранить") }
         },
@@ -652,7 +681,7 @@ fun SettingsScreen(
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
                                 keyboardActions = KeyboardActions(onDone = {
-                                    keyboard?.hide(); focusManager.clearFocus()
+                                    keyboard?.hide(); focusManager.clearFocus(force = true)
                                 })
                             )
                             OutlinedTextField(
@@ -663,7 +692,7 @@ fun SettingsScreen(
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
                                 keyboardActions = KeyboardActions(onDone = {
-                                    keyboard?.hide(); focusManager.clearFocus()
+                                    keyboard?.hide(); focusManager.clearFocus(force = true)
                                 })
                             )
                             OutlinedTextField(
@@ -674,7 +703,7 @@ fun SettingsScreen(
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
                                 keyboardActions = KeyboardActions(onDone = {
-                                    keyboard?.hide(); focusManager.clearFocus()
+                                    keyboard?.hide(); focusManager.clearFocus(force = true)
                                 })
                             )
                             Button(
@@ -685,7 +714,7 @@ fun SettingsScreen(
                                     onPlansChange(plans + (name to EmployeePlan(p, a, s)))
                                     selectedEmployee = null
                                     keyboard?.hide()
-                                    focusManager.clearFocus()
+                                    focusManager.clearFocus(force = true)
                                 },
                                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary)
@@ -711,7 +740,7 @@ fun SettingsScreen(
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
-                Text("Версия: 1.13.0", fontSize = 14.sp, color = TvStatsTextSecondary)
+                Text("Версия: 1.14.0", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Разработчик: Матранг", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Источник: 5element.by", fontSize = 14.sp, color = TvStatsTextSecondary)
