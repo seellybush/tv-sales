@@ -36,18 +36,21 @@ import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.util.Locale
 
-// === Мягкая пастельная палитра «TV STATS» ===
-val TvStatsBg = Color(0xFFF0F4F8)          // мягкий голубовато-серый
+val TvStatsBg = Color(0xFFF0F4F8)
 val TvStatsCard = Color(0xFFFFFFFF)
-val TvStatsPrimary = Color(0xFF5B8DEF)     // мягкий синий
-val TvStatsPrimaryDark = Color(0xFF3D6FCC)
+val TvStatsPrimary = Color(0xFF5B8DEF)
 val TvStatsText = Color(0xFF1F2937)
 val TvStatsTextSecondary = Color(0xFF6B7280)
 val TvStatsGreen = Color(0xFF10B981)
 val TvStatsRed = Color(0xFFEF4444)
 val TvStatsOrange = Color(0xFFF59E0B)
 
-// Формат без копеек
+// С копейками для отображения цен
+val moneyFormat: NumberFormat = NumberFormat.getNumberInstance(Locale("be", "BY")).apply {
+    minimumFractionDigits = 2
+    maximumFractionDigits = 2
+}
+// Целые для полей ввода плана
 val intFormat: NumberFormat = NumberFormat.getIntegerInstance(Locale("be", "BY"))
 
 data class Sale(
@@ -55,6 +58,7 @@ data class Sale(
     val price: Double,
     val employee: String,
     val productId: String = "",
+    val productUrl: String = "",     // ← сохраняем URL для парсинга гарантии
     val accessories: List<AccessoryItem> = emptyList(),
     val services: List<ServiceItem> = emptyList()
 ) {
@@ -110,8 +114,7 @@ fun App() {
                     .padding(vertical = 18.dp, horizontal = 20.dp)
             ) {
                 Text("TV STATS", fontSize = 24.sp, fontWeight = FontWeight.Bold,
-                    color = Color.White, modifier = Modifier.align(Alignment.Center),
-                    letterSpacing = 2.sp)
+                    color = Color.White, modifier = Modifier.align(Alignment.Center), letterSpacing = 2.sp)
             }
         },
         bottomBar = {
@@ -206,8 +209,8 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
                             }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
                                 Column(Modifier.padding(12.dp)) {
                                     Text(product.name, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = TvStatsText)
-                                    Text("${intFormat.format(product.price)} BYN", color = TvStatsPrimary, fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold)
+                                    Text("${moneyFormat.format(product.price)} BYN", color = TvStatsPrimary,
+                                        fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -222,7 +225,8 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
                 Column(Modifier.padding(16.dp)) {
                     Text("Выбрано", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsTextSecondary)
                     Text(sp.name, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = TvStatsText)
-                    Text("${intFormat.format(sp.price)} BYN", color = TvStatsPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text("${moneyFormat.format(sp.price)} BYN", color = TvStatsPrimary,
+                        fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 }
             }
         }
@@ -230,7 +234,8 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
         Button(
             onClick = {
                 val product = selectedProduct ?: return@Button
-                onSaleAdded(Sale(product.name, product.price, currentEmployee, product.id))
+                onSaleAdded(Sale(product.name, product.price, currentEmployee,
+                    productId = product.id, productUrl = product.url))
                 message = "Добавлено: ${product.name}"
                 query = ""; selectedProduct = null
             },
@@ -247,7 +252,6 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
     }
 }
 
-// === ВКЛАДКА ПРОДАЖИ — только суммы ТВ, акс/сервис мелкими строками ===
 @Composable
 fun SalesScreen(sales: List<Sale>, onDelete: (Sale) -> Unit, onUpdate: (Sale, Sale) -> Unit) {
     var selectedSale by remember { mutableStateOf<Sale?>(null) }
@@ -255,7 +259,7 @@ fun SalesScreen(sales: List<Sale>, onDelete: (Sale) -> Unit, onUpdate: (Sale, Sa
     Column(Modifier.padding(16.dp)) {
         Text("Статистика продаж", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TvStatsText)
         Spacer(Modifier.height(4.dp))
-        Text("Сумма ТВ: ${intFormat.format(sales.sumOf { it.price })} BYN",
+        Text("Сумма ТВ: ${moneyFormat.format(sales.sumOf { it.price })} BYN",
             fontSize = 18.sp, color = TvStatsPrimary, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(16.dp))
         Text("Нажми на ТВ, чтобы добавить акс/сервис", fontSize = 13.sp, color = TvStatsTextSecondary)
@@ -274,26 +278,24 @@ fun SalesScreen(sales: List<Sale>, onDelete: (Sale) -> Unit, onUpdate: (Sale, Sa
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text(sale.model, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = TvStatsText)
-                                    Text("ТВ: ${intFormat.format(sale.price)} BYN · ${sale.employee}",
+                                    Text("ТВ: ${moneyFormat.format(sale.price)} BYN · ${sale.employee}",
                                         fontSize = 13.sp, color = TvStatsPrimary, fontWeight = FontWeight.Bold)
                                 }
                                 IconButton(onClick = { onDelete(sale) }) {
                                     Icon(Icons.Default.Delete, "Удалить", tint = TvStatsRed)
                                 }
                             }
-                            // Аксессуары — красиво, мелкими строками
                             if (sale.accessories.isNotEmpty()) {
                                 Spacer(Modifier.height(4.dp))
                                 sale.accessories.forEach { acc ->
-                                    Text("  🔊 ${acc.name} — ${intFormat.format(acc.price)} BYN",
+                                    Text("  🔊 ${acc.name} — ${moneyFormat.format(acc.price)} BYN",
                                         fontSize = 11.sp, color = TvStatsTextSecondary)
                                 }
                             }
-                            // Сервисы — красиво, мелкими строками
                             if (sale.services.isNotEmpty()) {
                                 Spacer(Modifier.height(2.dp))
                                 sale.services.forEach { svc ->
-                                    Text("  🎬 ${svc.name} — ${intFormat.format(svc.price)} BYN",
+                                    Text("  🎬 ${svc.name} — ${moneyFormat.format(svc.price)} BYN",
                                         fontSize = 11.sp, color = TvStatsTextSecondary)
                                 }
                             }
@@ -321,10 +323,11 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
     var warrantyOptions by remember { mutableStateOf(listOf<WarrantyOption>()) }
     var loadingWarranty by remember { mutableStateOf(false) }
 
-    LaunchedEffect(sale.productId) {
-        if (sale.productId.isNotEmpty()) {
+    // 🛡️ Парсим гарантию по URL карточки товара
+    LaunchedEffect(sale.productUrl) {
+        if (sale.productUrl.isNotEmpty()) {
             loadingWarranty = true
-            warrantyOptions = PriceRepository.fetchWarranty(sale.productId)
+            warrantyOptions = PriceRepository.fetchWarrantyByUrl(sale.productUrl)
             loadingWarranty = false
         }
     }
@@ -342,7 +345,8 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                             Text("Добавлено:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TvStatsPrimary)
                             accessories.forEachIndexed { i, acc ->
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("🔊 ${acc.name} · ${intFormat.format(acc.price)} BYN", Modifier.weight(1f), fontSize = 12.sp)
+                                    Text("🔊 ${acc.name} · ${moneyFormat.format(acc.price)} BYN",
+                                        Modifier.weight(1f), fontSize = 12.sp)
                                     IconButton(onClick = { accessories.removeAt(i) }, modifier = Modifier.size(28.dp)) {
                                         Icon(Icons.Default.Close, "Удалить", tint = TvStatsRed, modifier = Modifier.size(16.dp))
                                     }
@@ -350,7 +354,8 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                             }
                             services.forEachIndexed { i, svc ->
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("🎬 ${svc.name} · ${intFormat.format(svc.price)} BYN", Modifier.weight(1f), fontSize = 12.sp)
+                                    Text("🎬 ${svc.name} · ${moneyFormat.format(svc.price)} BYN",
+                                        Modifier.weight(1f), fontSize = 12.sp)
                                     IconButton(onClick = { services.removeAt(i) }, modifier = Modifier.size(28.dp)) {
                                         Icon(Icons.Default.Close, "Удалить", tint = TvStatsRed, modifier = Modifier.size(16.dp))
                                     }
@@ -361,21 +366,28 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 }
 
-                // Гарантия — сразу видна, кнопки +1 / +2 / +3
+                // 🛡️ ГАРАНТИЯ
                 Text("🛡️ Расширенная гарантия", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsText)
-                if (loadingWarranty) CircularProgressIndicator(Modifier.size(20.dp))
-                else if (warrantyOptions.isEmpty()) Text("Гарантия для этой модели не найдена",
-                    fontSize = 12.sp, color = TvStatsTextSecondary)
-                else warrantyOptions.forEach { w ->
-                    Card(Modifier.fillMaxWidth().clickable {
-                        val name = "Гарантия +${w.years} год"
-                        if (services.none { it.name == name }) services.add(ServiceItem(name, w.price))
-                    }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
-                        Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("+${w.years} год", Modifier.weight(1f), fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium, color = TvStatsText)
-                            Text("${intFormat.format(w.price)} BYN", color = TvStatsPrimary,
-                                fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                if (loadingWarranty) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(20.dp), color = TvStatsPrimary)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Загружаю гарантию...", fontSize = 12.sp, color = TvStatsTextSecondary)
+                    }
+                } else if (warrantyOptions.isEmpty()) {
+                    Text("Гарантия для этой модели не найдена", fontSize = 12.sp, color = TvStatsTextSecondary)
+                } else {
+                    warrantyOptions.forEach { w ->
+                        Card(Modifier.fillMaxWidth().clickable {
+                            val name = "Гарантия +${w.years} год"
+                            if (services.none { it.name == name }) services.add(ServiceItem(name, w.price))
+                        }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
+                            Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text("+${w.years} год", Modifier.weight(1f), fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium, color = TvStatsText)
+                                Text("${moneyFormat.format(w.price)} BYN", color = TvStatsPrimary,
+                                    fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -393,7 +405,7 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     }, enabled = searchQuery.length >= 3 && !searching,
                         colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary)) { Text("Найти") }
                 }
-                if (searching) CircularProgressIndicator(Modifier.size(24.dp))
+                if (searching) CircularProgressIndicator(Modifier.size(24.dp), color = TvStatsPrimary)
                 searchResults.forEach { prod ->
                     Card(Modifier.fillMaxWidth().clickable {
                         accessories.add(AccessoryItem(prod.name, prod.price))
@@ -401,7 +413,7 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
                         Column(Modifier.padding(8.dp)) {
                             Text(prod.name, fontSize = 13.sp, color = TvStatsText)
-                            Text("${intFormat.format(prod.price)} BYN", color = TvStatsPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("${moneyFormat.format(prod.price)} BYN", color = TvStatsPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -415,7 +427,7 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
                         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(svc.name, Modifier.weight(1f), fontSize = 13.sp, color = TvStatsText)
-                            Text("${intFormat.format(svc.price)} BYN", color = TvStatsPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("${moneyFormat.format(svc.price)} BYN", color = TvStatsPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -430,7 +442,6 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
     )
 }
 
-// === НАСТРОЙКИ С КРУГАМИ ===
 @Composable
 fun SettingsScreen(
     sales: List<Sale>,
@@ -456,12 +467,8 @@ fun SettingsScreen(
             val planAccessories = if (plan.accessories > 0) plan.accessories else plan.product * 0.17
             val planService = if (plan.service > 0) plan.service else plan.product * 0.07
 
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = TvStatsCard),
-                elevation = CardDefaults.cardElevation(2.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
+                elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(name, fontSize = 18.sp, fontWeight = FontWeight.Bold,
@@ -469,11 +476,8 @@ fun SettingsScreen(
                         IconButton(onClick = {
                             selectedEmployee = if (selectedEmployee == name) null else name
                         }) {
-                            Icon(
-                                if (selectedEmployee == name) Icons.Default.KeyboardArrowUp else Icons.Default.Edit,
-                                "Редактировать план",
-                                tint = TvStatsPrimary
-                            )
+                            Icon(if (selectedEmployee == name) Icons.Default.KeyboardArrowUp else Icons.Default.Edit,
+                                "Редактировать план", tint = TvStatsPrimary)
                         }
                     }
 
@@ -488,125 +492,11 @@ fun SettingsScreen(
                                 value = productInput,
                                 onValueChange = { new -> productInput = new.filter { it.isDigit() } },
                                 label = { Text("План товар, BYN") },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
                                 singleLine = true,
-                                keyboardOptions = KeyboardOptions(
-                                    keyboardType = KeyboardType.Number,
-                                    imeAction = ImeAction.Done
-                                ),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
                                 keyboardActions = KeyboardActions(onDone = { keyboard?.hide() })
                             )
                             OutlinedTextField(
                                 value = accInput,
-                                onValueChange = { new -> accInput = new.filter { it.isDigit() } },
-                                label = { Text("План аксессуары, BYN") },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(8.dp),
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(
-                                    keyboardType = KeyboardType.Number,
-                                    imeAction = ImeAction.Done
-                                ),
-                                keyboardActions = KeyboardActions(onDone = { keyboard?.hide() })
-                            )
-                            OutlinedTextField(
-                                value = srvInput,
-                                onValueChange = { new -> srvInput = new.filter { it.isDigit() } },
-                                label = { Text("План доп. сервис, BYN") },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(8.dp),
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(
-                                    keyboardType = KeyboardType.Number,
-                                    imeAction = ImeAction.Done
-                                ),
-                                keyboardActions = KeyboardActions(onDone = { keyboard?.hide() })
-                            )
-                            Button(
-                                onClick = {
-                                    val p = productInput.toDoubleOrNull() ?: plan.product
-                                    val a = accInput.toDoubleOrNull() ?: planAccessories
-                                    val s = srvInput.toDoubleOrNull() ?: planService
-                                    onPlansChange(plans + (name to EmployeePlan(p, a, s)))
-                                    selectedEmployee = null
-                                    keyboard?.hide()
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary)
-                            ) { Text("Сохранить") }
-                        }
-                    }
-
-                    Spacer(Modifier.height(12.dp))
-                    MetricRow("Товар", factProduct, plan.product, TvStatsOrange)
-                    Spacer(Modifier.height(12.dp))
-                    HorizontalDivider()
-                    Spacer(Modifier.height(12.dp))
-                    MetricRow("Аксессуары", factAccessories, planAccessories, TvStatsOrange)
-                    Spacer(Modifier.height(12.dp))
-                    HorizontalDivider()
-                    Spacer(Modifier.height(12.dp))
-                    MetricRow("Доп. сервис", factService, planService, TvStatsGreen)
-                }
-            }
-        }
-
-        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
-            elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
-                Text("Версия: 1.0.0", fontSize = 14.sp, color = TvStatsTextSecondary)
-                Text("Разработчик: Матранг", fontSize = 14.sp, color = TvStatsTextSecondary)
-                Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp, color = TvStatsTextSecondary)
-                Text("Источник: 5element.by", fontSize = 14.sp, color = TvStatsTextSecondary)
-            }
-        }
-    }
-}
-
-@Composable
-fun MetricRow(title: String, fact: Double, plan: Double, color: Color) {
-    val percent = if (plan > 0) (fact / plan * 100).coerceAtMost(999.0) else 0.0
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = TvStatsText)
-            Spacer(Modifier.height(6.dp))
-            Text("Результат", fontSize = 12.sp, color = TvStatsTextSecondary)
-            Text(
-                intFormat.format(fact),
-                fontSize = 22.sp,
-                color = color,
-                fontWeight = FontWeight.Bold
-            )
-        }
-        CircularProgress(percent = percent, color = color, modifier = Modifier.size(110.dp))
-    }
-}
-
-@Composable
-fun CircularProgress(percent: Double, color: Color, modifier: Modifier = Modifier) {
-    Box(modifier, contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxSize()) {
-            val stroke = 14.dp.toPx()
-            val size = this.size.minDimension - stroke
-            drawArc(
-                color = Color(0xFFE8EAF0),
-                startAngle = -90f, sweepAngle = 360f, useCenter = false,
-                style = Stroke(width = stroke, cap = StrokeCap.Round),
-                topLeft = androidx.compose.ui.geometry.Offset(stroke / 2, stroke / 2),
-                size = androidx.compose.ui.geometry.Size(size, size)
-            )
-            val sweep = (percent / 100.0 * 360.0).coerceAtMost(360.0).toFloat()
-            drawArc(
-                color = color,
-                startAngle = -90f, sweepAngle = sweep, useCenter = false,
-                style = Stroke(width = stroke, cap = StrokeCap.Round),
-                topLeft = androidx.compose.ui.geometry.Offset(stroke / 2, stroke / 2),
-                size = androidx.compose.ui.geometry.Size(size, size)
-            )
-        }
-        Text("%.1f%%".format(percent), fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TvStatsText)
-    }
-}
+                                onValueChange = { new -> accInput
