@@ -12,19 +12,15 @@ android {
         applicationId = "by.tvsales"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4.0"
+        versionCode = 5
+        versionName = "1.5.0"
     }
-    buildFeatures {
-        compose = true
-    }
+    buildFeatures { compose = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    kotlinOptions { jvmTarget = "17" }
 }
 
 dependencies {
@@ -33,14 +29,14 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    // Для красивых иконок и анимаций
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
-    implementation("androidx.compose.animation:animation:1.7.8")
-    
     implementation("androidx.navigation:navigation-compose:2.8.5")
-    
+
     // Сеть
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // ML Kit — распознавание текста с фото
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.0")
 }
