@@ -190,15 +190,17 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
     if (showCamera) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             CameraScanner(
-                onModelDetected = { model ->
-                    query = model
-                    selectedProduct = null
-                    suggestions = PriceRepository.searchTVs(model)
-                    message = "Распознано: $model"
-                    showCamera = false
-                },
-                onDismiss = { showCamera = false }
-            )
+    onModelDetected = { model ->
+        query = model
+        selectedProduct = null
+        message = "Распознано: $model"
+        showCamera = false
+        scope.launch {
+            suggestions = PriceRepository.searchTVs(model)
+        }
+    },
+    onDismiss = { showCamera = false }
+)
         }
         return
     }
