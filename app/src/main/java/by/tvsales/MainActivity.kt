@@ -159,15 +159,14 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
     var suggestions by remember { mutableStateOf(listOf<FiveElementProduct>()) }
     var selectedProduct by remember { mutableStateOf<FiveElementProduct?>(null) }
     var message by remember { mutableStateOf("Введите модель телевизора") }
-    var scanning by remember { mutableStateOf(false) }
+    var showCamera by remember { mutableStateOf(false) }
 
-    // Галерея — выбор фото
+    // Галерея
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
             scope.launch {
-                scanning = true
                 message = "Распознаю модель с фото..."
                 val text = OcrHelper.recognizeText(context, uri)
                 val model = OcrHelper.extractModel(text)
@@ -179,13 +178,29 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
                 } else {
                     message = "Не удалось распознать модель. Введите вручную."
                 }
-                scanning = false
             }
         }
     }
 
     LaunchedEffect(query) {
         if (query.length >= 3) { delay(600); suggestions = PriceRepository.searchTVs(query) } else suggestions = emptyList()
+    }
+
+    // Полноэкранная камера
+    if (showCamera) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            CameraScanner(
+                onModelDetected = { model ->
+                    query = model
+                    selectedProduct = null
+                    suggestions = PriceRepository.searchTVs(model)
+                    message = "Распознано: $model"
+                    showCamera = false
+                },
+                onDismiss = { showCamera = false }
+            )
+        }
+        return
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -212,26 +227,30 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
 
                 Spacer(Modifier.height(8.dp))
 
-                // Кнопка сканирования модели с фото
-                Button(
-                    onClick = {
-                        galleryLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
-                    },
-                    enabled = !scanning,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = TvStatsGreen),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    if (scanning) {
-                        CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Распознаю...")
-                    } else {
+                // Две кнопки: камера + галерея
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { showCamera = true },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = TvStatsGreen),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
                         Icon(Icons.Default.PhotoCamera, null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Распознать модель с фото")
+                        Spacer(Modifier.width(6.dp))
+                        Text("Камера")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            galleryLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.PhotoLibrary, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Галерея")
                     }
                 }
 
@@ -650,7 +669,7 @@ fun SettingsScreen(
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
-                Text("Версия: 1.5.0", fontSize = 14.sp, color = TvStatsTextSecondary)
+                Text("Версия: 1.6.0", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Разработчик: Матранг", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Источник: 5element.by", fontSize = 14.sp, color = TvStatsTextSecondary)
