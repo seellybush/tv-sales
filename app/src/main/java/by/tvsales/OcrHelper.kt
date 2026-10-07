@@ -2,6 +2,7 @@ package by.tvsales
 
 import android.content.Context
 import android.net.Uri
+import com.google.mlkit.vision.common.ImageInput
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
@@ -25,169 +26,156 @@ object OcrHelper {
 
     fun extractModel(text: String): String {
         val rawLines = text.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
-        val upperLines = rawLines.map { it.uppercase() }
 
-        // === 🚫 ЗАПРЕЩЁННЫЕ СЛОВА (строка точно не модель) ===
-        val forbiddenWords = listOf(
-            "S/N", "SERIAL", "W/O", "DATE", "VOLTAGE", "WEIGHT", "DIMENSIONS",
-            "КГ", "ММ", "ВТ", "HZ", "ГАРАНТИЙНЫЙ", "СЕРВИСНЫЙ", "АДРЕС",
-            "ТЕЛ", "EAC", "TPB", "HDMI", "USB", "HDCP", "WEBOS", "TIZEN",
-            "ANDROID", "СМАРТ", "ТЕЛЕВИЗОР", "ТЕЛЕДИДАР", "ИЗГОТОВИТЕЛЬ",
-            "ПРОИЗВОДИТЕЛЬ", "ИМПОРТЕР", "СДЕЛАНО", "РОССИЯ", "БЕЛАРУСЬ",
-            "ПРОИЗВОДСТВЕННАЯ", "ПЛОЩАДКА", "ООО", "ГРУППА", "КОМПАНИЙ",
-            "ИНФОРМАЦИОННЫЙ", "ЦЕНТР", "БЕСПЛАТНЫЙ", "ЗВОНОК", "СВЯЗЬ",
-            "РАЗРЕШЕНИЕ", "ДИАГОНАЛЬ", "ПИТАНИЕ", "НАПРЯЖЕНИЕ",
-            "ЭКРАН", "ТИП", "МОЩНОСТЬ", "ВЕС", "ГАБАРИТ", "СТРАНА",
-            "СЕРТИФИКАТ", "СТАНДАРТ", "ПАМЯТЬ", "ПРОЦЕССОР", "ЧАСТОТА",
-            "ULTRA", "FULL", "PIX", "ПИКС", "SMART", "TV",
-            "ТУ BY", "ТУBY", "TYBY", "ТУ", "TY", "TU",
-            "СВИДЕТЕЛЬСТВО", "ДЕКЛАРАЦИЯ", "СООТВЕТСТВИЕ"
-        )
+        // === 🚫 СТРОКИ-ШУМ ===
+        fun isNoiseLine(line: String): Boolean {
+            val u = line.uppercase()
+            return u.contains("S/NO") || u.contains("S/N") ||
+                   u.contains("SERIAL") || u.contains("W/O") ||
+                   u.contains("VOLTAGE") || u.contains("WEIGHT") ||
+                   u.contains("DIMENSIONS") || u.contains("DATE") ||
+                   u.contains("КГ") || u.contains("ММ") || u.contains("ВТ") ||
+                   u.contains("ИЗГОТОВИТЕЛЬ") || u.contains("ИМПОРТЕР") ||
+                   u.contains("ПРОИЗВОДИТЕЛЬ") || u.contains("СДЕЛАНО") ||
+                   u.contains("АДРЕС") || u.contains("ТЕЛ.") ||
+                   u.contains("ТЕЛЕВИЗОР") || u.contains("ТЕЛЕДИДАР") ||
+                   u.contains("НАПРЯЖЕНИЕ") || u.contains("ПИТАНИЕ") ||
+                   u.contains("ГАРАНТИЙНЫЙ") || u.contains("СЕРВИСНЫЙ") ||
+                   u.contains("ТУ BY") || u.contains("ТУBY") ||
+                   u.contains("TYBY") || u.contains("TY BY") ||
+                   u.contains("СВИДЕТЕЛЬСТВО") || u.contains("ДЕКЛАРАЦИЯ")
+        }
 
-        // === 🔒 ЗАПРЕЩЁННЫЕ ПАТТЕРНЫ (разрешения, напряжения) ===
-        val forbiddenPatterns = listOf(
-            Regex("\\d{3,4}[XxNn]\\d{3,4}"),        // 3840x2160, 3840N2160
-            Regex("\\b\\d{3,4}[Pp]\\b"),              // 1080P
-            Regex("\\b(1080|720|2160|3840|4096|8K|4K|2K|UHD|FHD|HD|SD)\\b"),
-            Regex("\\b(220|240|110|120)[-–]?\\d{2,3}V\\b"),
-            Regex("\\b\\d{2,3}\\s?HZ\\b"),
-            Regex("^\\d{4,}$"),                       // только цифры 4+
-            Regex("^[A-Z]{2,5}\\d{8,}$"),             // длинные буквенно-цифровые (ТУ, S/N)
-            Regex("\\d{8,}")                          // 8+ цифр подряд
-        )
+        // === 🚫 ЯВНЫЙ S/N ===
+        // Например: Quantum202670010652, 609RADC65786, 3TE55G25361JRU71VT10330
+        fun isSerialNumber(line: String): Boolean {
+            val u = line.uppercase().replace(" ", "")
+            // S/N обычно: буквы + 8+ цифр подряд, или 10+ символов без пробелов
+            if (Regex("[A-Z]{2,}\\d{8,}").containsMatchIn(u)) return true
+            if (Regex("\\d{8,}").containsMatchIn(u)) return true
+            if (u.length >= 15 && u.count { it.isDigit() } >= 8) return true
+            return false
+        }
 
+        // === 🔧 ИСПРАВЛЕНИЕ OCR-ОШИБОК ===
+        fun fixOcrMistakes(s: String): String {
+            var result = s.uppercase().replace(" ", "")
+            // 550NED → 55QNED (OCR путает Q с 0)
+            val pattern = Regex("^(\\d{2})(0)([A-Z].*)$")
+            val match = pattern.find(result)
+            if (match != null) {
+                result = match.groupValues[1] + "Q" + match.groupValues[3]
+            }
+            return result
+        }
+
+        // === ✅ ПРОВЕРКА МОДЕЛИ ===
         fun isCleanModel(s: String): Boolean {
             val upper = s.uppercase().trim()
-
-            // 1. Длина: 4–15
-            if (upper.length < 4 || upper.length > 15) return false
-
-            // 2. Запрещённые слова
-            if (forbiddenWords.any { upper.contains(it) }) return false
-
-            // 3. Запрещённые паттерны
-            if (forbiddenPatterns.any { it.containsMatchIn(upper) }) return false
-
-            // 4. Должны быть и буквы, и цифры
+            if (upper.length < 4 || upper.length > 20) return false
             if (!upper.any { it.isDigit() }) return false
             if (!upper.any { it.isLetter() }) return false
 
-            // 5. ❗ МОДЕЛЬ НАЧИНАЕТСЯ С ЦИФР (диагональ 24–98)
+            // Начинается с диагонали 24-98
             val diagMatch = Regex("^(\\d{2,3})").find(upper) ?: return false
             val diag = diagMatch.groupValues[1].toIntOrNull() ?: return false
             if (diag < 24 || diag > 98) return false
 
-            // 6. Не должно быть 4+ цифр подряд (ТУ, S/N, разрешение)
+            // Нет 4+ цифр подряд
             if (Regex("\\d{4,}").containsMatchIn(upper)) return false
 
-            // 7. Не должно быть букв X или N между цифрами (это разрешение)
+            // Нет X/N между цифрами (это разрешение)
             if (Regex("\\d[XxNn]\\d").containsMatchIn(upper)) return false
-
-            // 8. Не заканчивается на MM / KG / V / HZ / W
-            if (upper.endsWith("MM") || upper.endsWith("KG") ||
-                upper.endsWith("HZ") || upper.endsWith("V")) return false
 
             return true
         }
 
-        fun normalize(s: String): String {
-            return s.uppercase()
-                .replace(" ", "")
-                .replace(".", "")
-                .replace("-", "")
-                .replace("Х", "X")
-                .trim()
-        }
+        // === 🎯 ПРИОРИТЕТ 1: QUANTUM ===
+        // Ищем строку, где "Quantum" отделено пробелом от модели (короткого кода)
+        for (line in rawLines) {
+            if (isNoiseLine(line)) continue
+            if (isSerialNumber(line)) continue
 
-        // Паттерн модели: 2 цифры (24-98) + 1-6 букв + цифры/буквы
-        val modelPattern = Regex("\\b(2[4-9]|[3-8]\\d|9[0-8])([A-Z]{1,6}\\d{0,5}[A-Z0-9]{0,8})\\b")
-
-        // === ПРИОРИТЕТ 1: QUANTUM — модель после слова ===
-        for (i in rawLines.indices) {
-            if (rawLines[i].contains("Quantum", ignoreCase = true)) {
-                // Пробуем взять часть строки после "Quantum"
-                val afterQuantum = rawLines[i].replace(Regex("(?i)quantum"), "").trim()
-                val candidate = normalize(afterQuantum)
+            // Строка типа "Quantum 24H6BQ" — есть пробел после Quantum
+            val match = Regex("(?i)quantum\\s+([0-9]{2}[A-Z0-9]{2,10})").find(line)
+            if (match != null) {
+                val candidate = fixOcrMistakes(match.groupValues[1])
                 if (isCleanModel(candidate)) return candidate
-
-                // Или соседние строки
-                if (i + 1 < rawLines.size) {
-                    val next = normalize(rawLines[i + 1])
-                    if (isCleanModel(next)) return next
-                }
-                if (i - 1 >= 0) {
-                    val prev = normalize(rawLines[i - 1])
-                    if (isCleanModel(prev)) return prev
-                }
+            }
+        }
+        // Если не нашли с пробелом — ищем "Quantum24H6BQ" (без пробела, но с коротким кодом)
+        for (line in rawLines) {
+            if (isNoiseLine(line)) continue
+            if (isSerialNumber(line)) continue
+            val match = Regex("(?i)quantum([0-9]{2}[A-Z][A-Z0-9]{2,8})").find(line)
+            if (match != null) {
+                val candidate = fixOcrMistakes(match.groupValues[1])
+                if (isCleanModel(candidate)) return candidate
             }
         }
 
-        // === ПРИОРИТЕТ 2: LG — только строки без S/N ===
-        val isLG = upperLines.any { it.contains("LG") || it.contains("WEBOS") }
+        // === 🎯 ПРИОРИТЕТ 2: LG — модель после W/O или на отдельной строке ===
+        val isLG = rawLines.any { it.contains("LG", ignoreCase = true) ||
+                                  it.contains("S/NO", ignoreCase = true) }
         if (isLG) {
+            // После W/O
+            for (i in rawLines.indices) {
+                if (rawLines[i].uppercase().contains("W/O")) {
+                    if (i + 1 < rawLines.size) {
+                        val candidate = fixOcrMistakes(
+                            rawLines[i + 1].replace(" ", "").substringBefore(".")
+                        )
+                        if (isCleanModel(candidate)) return candidate
+                    }
+                }
+            }
+            // Или строка с паттерном LG (без S/N)
             for (line in rawLines) {
-                val upper = line.uppercase()
-                if (upper.contains("S/N") || upper.contains("SERIAL") || upper.contains("W/O")) continue
-                if (upper.contains("609") || upper.contains("RAD")) continue // типичный S/N LG
+                if (isNoiseLine(line)) continue
+                if (isSerialNumber(line)) continue
+                val cleaned = fixOcrMistakes(line.substringBefore("."))
+                val m = Regex("(\\d{2,3})([A-Z]{1,6}\\d{0,5}[A-Z0-9]{0,8})").find(cleaned)
+                if (m != null && isCleanModel(m.value)) return m.value
+            }
+        }
 
-                val cleaned = normalize(upper)
-                val match = modelPattern.find(cleaned)
-                if (match != null) {
-                    val candidate = match.value
+        // === 🎯 ПРИОРИТЕТ 3: Строка после MODEL/МОДЕЛЬ ===
+        for (i in rawLines.indices) {
+            val u = rawLines[i].uppercase()
+            if (u.contains("MODEL") || u.contains("МОДЕЛЬ")) {
+                val afterModel = u.replace("MODEL", "").replace("МОДЕЛЬ", "")
+                    .replace(":", "").trim()
+                if (afterModel.length >= 4) {
+                    val candidate = fixOcrMistakes(afterModel)
+                    if (isCleanModel(candidate)) return candidate
+                }
+                if (i + 1 < rawLines.size) {
+                    val candidate = fixOcrMistakes(rawLines[i + 1].substringBefore("."))
                     if (isCleanModel(candidate)) return candidate
                 }
             }
         }
 
-        // === ПРИОРИТЕТ 3: Строка после MODEL/МОДЕЛЬ ===
-        for (i in rawLines.indices) {
-            val upper = upperLines[i]
-            if (upper == "MODEL" || upper.startsWith("MODEL ") ||
-                upper == "МОДЕЛЬ" || upper.startsWith("МОДЕЛЬ ")) {
-
-                val sameLine = normalize(upper.replace("MODEL", "").replace("МОДЕЛЬ", ""))
-                if (isCleanModel(sameLine)) return sameLine
-
-                if (i + 1 < rawLines.size) {
-                    val next = normalize(rawLines[i + 1])
-                    if (isCleanModel(next)) return next
-                }
-            }
-        }
-
-        // === ПРИОРИТЕТ 4: Строка после бренда ===
-        val brands = listOf(
-            "TCL", "SAMSUNG", "HISENSE", "SONY", "PHILIPS", "XIAOMI", "LG",
-            "ROOME", "HAIER", "QUANTUM", "HORIZONT", "ВИТЯЗЬ", "ASANO",
-            "HYUNDAI", "HARPER", "LEFF", "DREAME", "ЯНДЕКС", "KIVI", "FOX",
-            "EVO", "MIDEA", "TOSHIBA", "PANASONIC"
-        )
-        for (i in rawLines.indices) {
-            if (brands.any { upperLines[i] == it || upperLines[i].startsWith("$it ") }) {
-                if (i + 1 < rawLines.size) {
-                    val next = normalize(rawLines[i + 1])
-                    if (isCleanModel(next)) return next
-                }
-            }
-        }
-
-        // === ПРИОРИТЕТ 5: Первые 7 строк с паттерном ===
+        // === 🎯 ПРИОРИТЕТ 4: Первые 7 строк с паттерном модели ===
         for (i in 0 until minOf(7, rawLines.size)) {
-            val cleaned = normalize(upperLines[i])
-            val matches = modelPattern.findAll(cleaned)
-            for (m in matches) {
+            if (isNoiseLine(rawLines[i])) continue
+            if (isSerialNumber(rawLines[i])) continue
+            val cleaned = fixOcrMistakes(rawLines[i])
+            for (m in Regex("(\\d{2,3})([A-Z]{1,6}\\d{0,5}[A-Z0-9]{0,8})").findAll(cleaned)) {
                 if (isCleanModel(m.value)) return m.value
             }
         }
 
-        // === ПРИОРИТЕТ 6: Любой паттерн в тексте, самый длинный ===
-        val allText = rawLines.joinToString(" ").uppercase()
+        // === 🎯 ПРИОРИТЕТ 5: Любой паттерн в тексте ===
+        val allText = rawLines
+            .filter { !isNoiseLine(it) && !isSerialNumber(it) }
+            .joinToString(" ")
+            .uppercase()
         var best = ""
-        for (m in modelPattern.findAll(allText)) {
-            if (isCleanModel(m.value) && m.value.length > best.length) best = m.value
+        for (m in Regex("(\\d{2,3})([A-Z]{1,6}\\d{0,5}[A-Z0-9]{0,8})").findAll(allText)) {
+            val candidate = fixOcrMistakes(m.value)
+            if (isCleanModel(candidate) && candidate.length > best.length) best = candidate
         }
-        if (best.isNotEmpty()) return best
-
-        return ""
+        return best
     }
 }
