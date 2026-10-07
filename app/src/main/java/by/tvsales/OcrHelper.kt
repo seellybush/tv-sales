@@ -10,6 +10,11 @@ import kotlin.coroutines.resume
 
 object OcrHelper {
 
+    // Реальные диагонали телевизоров (то, что продаётся в РБ)
+    private val validDiagonals = setOf(
+        24, 28, 32, 39, 40, 42, 43, 48, 50, 55, 58, 60, 65, 70, 75, 77, 83, 85, 98, 100, 115
+    )
+
     suspend fun recognizeText(context: Context, imageUri: Uri): String =
         suspendCancellableCoroutine { continuation ->
             try {
@@ -30,7 +35,8 @@ object OcrHelper {
             "S/N", "S/NO", "SERIAL", "W/O", "VOLTAGE", "WEIGHT", "DIMENSIONS",
             "ТУ BY", "TYBY", "ТУBY", "ИЗГОТОВИТЕЛЬ", "ИМПОРТЕР", "СДЕЛАНО",
             "АДРЕС", "НАПРЯЖЕНИЕ", "ПИТАНИЕ", "ГАРАНТИЙНЫЙ", "СЕРВИСНЫЙ",
-            "ТЕЛЕВИЗОР", "ТЕЛЕДИДАР", "EAC", "HDMI", "USB", "WEBOS", "TIZEN"
+            "ТЕЛЕВИЗОР", "ТЕЛЕДИДАР", "EAC", "HDMI", "USB", "WEBOS", "TIZEN",
+            "ANDROID", "GOOGLE", "SMART", "QUANTUM", "КВАНТУМ"
         )
 
         fun isNoise(line: String): Boolean {
@@ -52,8 +58,11 @@ object OcrHelper {
             if (upper.length < 4 || upper.length > 15) return false
             if (!upper.any { it.isDigit() }) return false
             if (!upper.any { it.isLetter() }) return false
+
+            // ❗ Диагональ должна быть РЕАЛЬНОЙ
             val diag = Regex("^(\\d{2,3})").find(upper)?.groupValues?.get(1)?.toIntOrNull() ?: return false
-            if (diag < 24 || diag > 98) return false
+            if (diag !in validDiagonals) return false
+
             if (Regex("\\d{4,}").containsMatchIn(upper)) return false
             if (Regex("\\d[XxNn]\\d").containsMatchIn(upper)) return false
             if (upper.endsWith("MM") || upper.endsWith("KG") ||
@@ -76,7 +85,7 @@ object OcrHelper {
             if (isNoise(line)) continue
             if (isSerial(line)) continue
 
-            val matches = Regex("\\b(2[4-9]|[3-8]\\d|9[0-8])([A-Z]{1,6}\\d{0,5}[A-Z0-9]{0,8})\\b")
+            val matches = Regex("\\b(2[48]|3[29]|4[0238]|50|5[058]|60|65|70|75|77|83|85|98)([A-Z]{1,8}\\d{0,5}[A-Z0-9]{0,8})\\b")
                 .findAll(fixOcr(line))
 
             for (m in matches) {
