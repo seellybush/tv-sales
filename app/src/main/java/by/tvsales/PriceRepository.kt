@@ -48,26 +48,21 @@ data class WarrantyOption(val years: Int, val price: Double)
 
 // === ВИДЕОСЕРВИСЫ + Skipsy ===
 val videoServices = listOf(
-    // iTV
     ServiceItem("iTV 6 мес", 89.90),
     ServiceItem("iTV 12 мес", 169.90),
     ServiceItem("iTV 24 мес", 349.90),
     ServiceItem("iTV 36 мес", 499.90),
-    // Кинопоиск
     ServiceItem("Кинопоиск 6 мес", 99.90),
     ServiceItem("Кинопоиск 12 мес", 179.90),
     ServiceItem("Кинопоиск 24 мес", 329.90),
     ServiceItem("Кинопоиск 36 мес", 449.90),
-    // Okko Премиум
     ServiceItem("Okko 6 мес", 94.90),
     ServiceItem("Okko 12 мес", 189.90),
     ServiceItem("Okko 24 мес", 324.90),
     ServiceItem("Okko 36 мес", 444.90),
-    // VOKA
     ServiceItem("VOKA 12 мес", 199.90),
     ServiceItem("VOKA 24 мес", 349.90),
     ServiceItem("VOKA 36 мес", 499.00),
-    // Skipsy
     ServiceItem("Skipsy 6 мес", 59.90),
     ServiceItem("Skipsy 12 мес", 109.90),
     ServiceItem("Skipsy 24 мес", 199.90),
@@ -125,12 +120,16 @@ object PriceRepository {
         }
     }
 
-    // 🔊 Поиск САУНДБАРОВ (звуковых панелей) — фильтр по названию
-    suspend fun searchSoundbars(query: String): List<FiveElementProduct> = withContext(Dispatchers.IO) {
+    // 🔊 Поиск саундбаров с фильтром по цене
+    suspend fun searchSoundbars(
+        query: String,
+        priceFrom: Int? = null,
+        priceTo: Int? = null
+    ): List<FiveElementProduct> = withContext(Dispatchers.IO) {
         if (query.length < 2) return@withContext emptyList()
         try {
             val encoded = URLEncoder.encode(query, "UTF-8")
-            val url = "$DIGINETICA_URL?st=$encoded" +
+            val urlBuilder = StringBuilder("$DIGINETICA_URL?st=$encoded" +
                     "&apiKey=$DIGINETICA_API_KEY" +
                     "&strategy=advanced_xname%2Czero_queries" +
                     "&productsSize=50" +
@@ -138,9 +137,11 @@ object PriceRepository {
                     "&forIs=true" +
                     "&showUnavailable=true" +
                     "&withContent=false" +
-                    "&withSku=false"
+                    "&withSku=false")
+            if (priceFrom != null && priceFrom > 0) urlBuilder.append("&price_from=$priceFrom")
+            if (priceTo != null && priceTo > 0) urlBuilder.append("&price_to=$priceTo")
 
-            val req = Request.Builder().url(url)
+            val req = Request.Builder().url(urlBuilder.toString())
                 .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
                 .header("Accept", "application/json").build()
 
@@ -149,7 +150,6 @@ object PriceRepository {
             val body = resp.body?.string() ?: return@withContext emptyList()
             val parsed = json.decodeFromString<DigineticaResponse>(body)
 
-            // Фильтр: саундбар, звуковая панель, акустическая система, soundbar
             parsed.products
                 .filter { product ->
                     val n = product.name.lowercase()
@@ -175,12 +175,16 @@ object PriceRepository {
         }
     }
 
-    // 🔧 Поиск кронштейнов
-    suspend fun searchBrackets(query: String): List<FiveElementProduct> = withContext(Dispatchers.IO) {
+    // 🔧 Поиск кронштейнов с фильтром по цене
+    suspend fun searchBrackets(
+        query: String,
+        priceFrom: Int? = null,
+        priceTo: Int? = null
+    ): List<FiveElementProduct> = withContext(Dispatchers.IO) {
         if (query.length < 2) return@withContext emptyList()
         try {
             val encoded = URLEncoder.encode(query, "UTF-8")
-            val url = "$DIGINETICA_URL?st=$encoded" +
+            val urlBuilder = StringBuilder("$DIGINETICA_URL?st=$encoded" +
                     "&apiKey=$DIGINETICA_API_KEY" +
                     "&strategy=advanced_xname%2Czero_queries" +
                     "&productsSize=50" +
@@ -188,9 +192,11 @@ object PriceRepository {
                     "&forIs=true" +
                     "&showUnavailable=true" +
                     "&withContent=false" +
-                    "&withSku=false"
+                    "&withSku=false")
+            if (priceFrom != null && priceFrom > 0) urlBuilder.append("&price_from=$priceFrom")
+            if (priceTo != null && priceTo > 0) urlBuilder.append("&price_to=$priceTo")
 
-            val req = Request.Builder().url(url)
+            val req = Request.Builder().url(urlBuilder.toString())
                 .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
                 .header("Accept", "application/json").build()
 
