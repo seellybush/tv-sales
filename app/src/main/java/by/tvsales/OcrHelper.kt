@@ -26,7 +26,6 @@ object OcrHelper {
     fun extractModel(text: String): String {
         val rawLines = text.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
 
-        // Строки-шум (S/N, ТУ, напряжение и т.д.)
         val noise = listOf(
             "S/N", "S/NO", "SERIAL", "W/O", "VOLTAGE", "WEIGHT", "DIMENSIONS",
             "ТУ BY", "TYBY", "ТУBY", "ИЗГОТОВИТЕЛЬ", "ИМПОРТЕР", "СДЕЛАНО",
@@ -41,18 +40,13 @@ object OcrHelper {
 
         fun isSerial(line: String): Boolean {
             val u = line.uppercase().replace(" ", "")
-            // 8+ цифр подряд — серийник
             if (Regex("\\d{8,}").containsMatchIn(u)) return true
-            // Начинается с TY/TУ — это ТУ
             if (u.startsWith("TY") || u.startsWith("ТУ")) return true
-            // 15+ символов с 6+ цифрами
             if (u.length >= 15 && u.count { it.isDigit() } >= 6) return true
-            // Буквы + 6+ цифр
             if (Regex("[A-Z]{2,}\\d{6,}").containsMatchIn(u)) return true
             return false
         }
 
-        // Модель: 2 цифры (24-98) + буквы/цифры, длина 4-15, без 4+ цифр подряд
         fun isCleanModel(s: String): Boolean {
             val upper = s.uppercase().trim()
             if (upper.length < 4 || upper.length > 15) return false
@@ -67,7 +61,6 @@ object OcrHelper {
             return true
         }
 
-        // Исправление OCR: 550NED → 55QNED
         fun fixOcr(s: String): String {
             var r = s.uppercase().replace(" ", "").substringBefore(".")
             val m = Regex("^(\\d{2})(0)([A-Z].*)$").find(r)
