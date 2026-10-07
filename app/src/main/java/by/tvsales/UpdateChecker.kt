@@ -32,7 +32,7 @@ object UpdateChecker {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     private const val REPO = "seellybush/tv-sales"
-    private const val CURRENT_VERSION = "1.7.0"
+    private const val CURRENT_VERSION = "1.9.0"
 
     suspend fun checkForUpdates(): UpdateInfo? = withContext(Dispatchers.IO) {
         try {
