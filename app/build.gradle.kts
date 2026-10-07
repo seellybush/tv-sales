@@ -12,8 +12,8 @@ android {
         applicationId = "by.tvsales"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.6.0"
+        versionCode = 7
+        versionName = "1.7.0"
     }
     buildFeatures { compose = true }
     compileOptions {
@@ -32,15 +32,12 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
     implementation("androidx.navigation:navigation-compose:2.8.5")
 
-    // Сеть
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
-    // ML Kit — распознавание текста
     implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.0")
 
-    // CameraX — камера в реальном времени
     val cameraxVersion = "1.4.1"
     implementation("androidx.camera:camera-core:$cameraxVersion")
     implementation("androidx.camera:camera-camera2:$cameraxVersion")
