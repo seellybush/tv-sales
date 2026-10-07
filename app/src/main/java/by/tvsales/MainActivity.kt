@@ -172,7 +172,7 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
                     query = model
                     selectedProduct = null
                     suggestions = PriceRepository.searchTVs(model)
-                    message = "Распознано: $model"
+                    message = "OCR: ${text.replace("\n", " ").take(150)}"
                 } else {
                     message = "Не удалось распознать модель. Введите вручную."
                 }
