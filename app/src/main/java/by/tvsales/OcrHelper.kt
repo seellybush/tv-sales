@@ -128,9 +128,11 @@ object OcrHelper {
             .firstOrNull()?.value ?: ""
     }
 
-    // Варианты для поиска (OCR-ошибки: 8→B, 0→O, 1→L/I, 5→S, G→6)
+    // Варианты для поиска (OCR-ошибки + усечение последнего символа)
     fun generateSearchVariants(model: String): List<String> {
         val variants = mutableListOf(model)
+
+        // OCR-замены
         if (model.contains("8")) variants.add(model.replace("8", "B"))
         if (model.contains("0")) variants.add(model.replace("0", "O"))
         if (model.contains("O")) variants.add(model.replace("O", "0"))
@@ -141,6 +143,15 @@ object OcrHelper {
         if (model.contains("G")) variants.add(model.replace("G", "6"))
         if (model.contains("B")) variants.add(model.replace("B", "8"))
         if (model.endsWith("8")) variants.add(model.dropLast(1) + "B")
+
+        // Усечение последнего символа (если OCR прочитал букву неверно)
+        if (model.length >= 6) {
+            variants.add(model.dropLast(1))
+        }
+        if (model.length >= 7) {
+            variants.add(model.dropLast(2))
+        }
+
         return variants.distinct()
     }
 }
