@@ -154,12 +154,18 @@ fun App() {
 fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSaleAdded: (Sale) -> Unit) {
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     val context = LocalContext.current
     var query by remember { mutableStateOf("") }
     var suggestions by remember { mutableStateOf(listOf<FiveElementProduct>()) }
     var selectedProduct by remember { mutableStateOf<FiveElementProduct?>(null) }
     var message by remember { mutableStateOf("Введите модель телевизора") }
     var showCamera by remember { mutableStateOf(false) }
+
+    fun hideKeyboard() {
+        keyboard?.hide()
+        focusManager.clearFocus()
+    }
 
     fun searchWithVariants(model: String) {
         scope.launch {
@@ -232,7 +238,8 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
                     shape = RoundedCornerShape(12.dp), singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = {
-                        keyboard?.hide(); scope.launch { suggestions = PriceRepository.searchTVs(query) }
+                        hideKeyboard()
+                        scope.launch { suggestions = PriceRepository.searchTVs(query) }
                     }),
                     trailingIcon = {
                         if (query.isNotEmpty()) IconButton(onClick = { query = ""; suggestions = emptyList() }) {
@@ -271,7 +278,7 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
                         items(suggestions.size) { index ->
                             val product = suggestions[index]
                             Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
-                                keyboard?.hide()
+                                hideKeyboard()
                                 selectedProduct = product
                                 query = product.name
                                 suggestions = emptyList()
@@ -423,10 +430,14 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
         }
     }
 
-    fun doSearch() {
-        if (searchQuery.length < 3) return
+    fun hideKeyboard() {
         keyboard?.hide()
         focusManager.clearFocus()
+    }
+
+    fun doSearch() {
+        if (searchQuery.length < 3) return
+        hideKeyboard()
         searching = true
         scope.launch {
             searchResults = if (searchMode == "bracket")
@@ -551,8 +562,7 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     Card(Modifier.fillMaxWidth().clickable {
                         accessories.add(AccessoryItem(prod.name, prod.price))
                         searchResults = emptyList(); searchQuery = ""
-                        keyboard?.hide()
-                        focusManager.clearFocus()
+                        hideKeyboard()
                     }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
                         Column(Modifier.padding(8.dp)) {
                             Text(prod.name, fontSize = 13.sp, color = TvStatsText)
@@ -595,6 +605,7 @@ fun SettingsScreen(
 ) {
     var selectedEmployee by remember { mutableStateOf<String?>(null) }
     val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
 
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -640,7 +651,9 @@ fun SettingsScreen(
                                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = { keyboard?.hide() })
+                                keyboardActions = KeyboardActions(onDone = {
+                                    keyboard?.hide(); focusManager.clearFocus()
+                                })
                             )
                             OutlinedTextField(
                                 value = accInput,
@@ -649,7 +662,9 @@ fun SettingsScreen(
                                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = { keyboard?.hide() })
+                                keyboardActions = KeyboardActions(onDone = {
+                                    keyboard?.hide(); focusManager.clearFocus()
+                                })
                             )
                             OutlinedTextField(
                                 value = srvInput,
@@ -658,7 +673,9 @@ fun SettingsScreen(
                                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = { keyboard?.hide() })
+                                keyboardActions = KeyboardActions(onDone = {
+                                    keyboard?.hide(); focusManager.clearFocus()
+                                })
                             )
                             Button(
                                 onClick = {
@@ -668,6 +685,7 @@ fun SettingsScreen(
                                     onPlansChange(plans + (name to EmployeePlan(p, a, s)))
                                     selectedEmployee = null
                                     keyboard?.hide()
+                                    focusManager.clearFocus()
                                 },
                                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary)
@@ -693,7 +711,7 @@ fun SettingsScreen(
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
-                Text("Версия: 1.12.0", fontSize = 14.sp, color = TvStatsTextSecondary)
+                Text("Версия: 1.13.0", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Разработчик: Матранг", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Источник: 5element.by", fontSize = 14.sp, color = TvStatsTextSecondary)
