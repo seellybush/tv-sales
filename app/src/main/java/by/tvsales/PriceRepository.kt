@@ -170,7 +170,7 @@ object PriceRepository {
         }
     }
 
-    // 🔧 Поиск кронштейнов (с фильтром по цене в Kotlin)
+    // 🔧 Поиск кронштейнов с фильтром по цене и логированием
     suspend fun searchBrackets(
         query: String,
         priceFrom: Int? = null,
@@ -215,14 +215,16 @@ object PriceRepository {
                 }
                 .filter { it.price > 5 }
 
-            // Фильтр по цене в Kotlin
+            // Отладка
+            println("BRACKETS_RAW count=${allBrackets.size}")
+            allBrackets.take(10).forEach { println("  ${it.name.take(40)} = ${it.price}") }
+            println("FILTER from=$priceFrom to=$priceTo")
+
             var result = allBrackets
-            if (priceFrom != null && priceFrom > 0) {
-                result = result.filter { it.price >= priceFrom }
-            }
-            if (priceTo != null && priceTo > 0) {
-                result = result.filter { it.price <= priceTo }
-            }
+            if (priceFrom != null && priceFrom > 0) result = result.filter { it.price >= priceFrom }
+            if (priceTo != null && priceTo > 0) result = result.filter { it.price <= priceTo }
+
+            println("BRACKETS_FILTERED count=${result.size}")
             result
         } catch (e: Exception) {
             e.printStackTrace()
