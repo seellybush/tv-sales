@@ -57,7 +57,6 @@ data class Sale(
     val employee: String,
     val productId: String = "",
     val productUrl: String = "",
-    val vesa: String = "",
     val accessories: List<AccessoryItem> = emptyList(),
     val services: List<ServiceItem> = emptyList()
 ) {
@@ -154,32 +153,13 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
     var suggestions by remember { mutableStateOf(listOf<FiveElementProduct>()) }
     var selectedProduct by remember { mutableStateOf<FiveElementProduct?>(null) }
     var message by remember { mutableStateOf("Введите модель телевизора") }
-    var fetchingVesa by remember { mutableStateOf(false) }
 
     LaunchedEffect(query) {
         if (query.length >= 3) { delay(600); suggestions = PriceRepository.searchTVs(query) } else suggestions = emptyList()
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        var empExpanded by remember { mutableStateOf(false) }
-        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
-            elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
-                Text("Кто продаёт?", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
-                Spacer(Modifier.height(8.dp))
-                ExposedDropdownMenuBox(empExpanded, { empExpanded = !empExpanded }) {
-                    OutlinedTextField(value = currentEmployee, onValueChange = {}, readOnly = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(empExpanded) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth(), shape = RoundedCornerShape(12.dp))
-                    ExposedDropdownMenu(empExpanded, { empExpanded = false }) {
-                        employees.forEach { name ->
-                            DropdownMenuItem(text = { Text(name) }, onClick = { onEmployeeChange(name); empExpanded = false })
-                        }
-                    }
-                }
-            }
-        }
-
+        // === 1. МОДЕЛЬ ТЕЛЕВИЗОРА (теперь первым) ===
         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
@@ -209,13 +189,6 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
                                 query = product.name
                                 suggestions = emptyList()
                                 message = "Выбрано: ${product.name}"
-                                scope.launch {
-                                    fetchingVesa = true
-                                    val vesa = PriceRepository.fetchVesa(product.url)
-                                    selectedProduct = product.copy(vesa = vesa)
-                                    fetchingVesa = false
-                                    message = if (vesa.isNotEmpty()) "VESA: $vesa" else "VESA не найден"
-                                }
                             }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
                                 Column(Modifier.padding(12.dp)) {
                                     Text(product.name, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = TvStatsText)
@@ -229,6 +202,27 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
             }
         }
 
+        // === 2. КТО ПРОДАЁТ (теперь вторым) ===
+        var empExpanded by remember { mutableStateOf(false) }
+        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
+            elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Кто продаёт?", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
+                Spacer(Modifier.height(8.dp))
+                ExposedDropdownMenuBox(empExpanded, { empExpanded = !empExpanded }) {
+                    OutlinedTextField(value = currentEmployee, onValueChange = {}, readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(empExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+                    ExposedDropdownMenu(empExpanded, { empExpanded = false }) {
+                        employees.forEach { name ->
+                            DropdownMenuItem(text = { Text(name) }, onClick = { onEmployeeChange(name); empExpanded = false })
+                        }
+                    }
+                }
+            }
+        }
+
+        // === 3. ВЫБРАННЫЙ ТОВАР ===
         selectedProduct?.let { sp ->
             Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
                 elevation = CardDefaults.cardElevation(4.dp), modifier = Modifier.fillMaxWidth()) {
@@ -237,15 +231,6 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
                     Text(sp.name, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = TvStatsText)
                     Text("${moneyFormat.format(sp.price)} BYN", color = TvStatsPrimary,
                         fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    if (fetchingVesa) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(Modifier.size(14.dp), color = TvStatsPrimary, strokeWidth = 2.dp)
-                            Spacer(Modifier.width(6.dp))
-                            Text("Определяю VESA...", fontSize = 12.sp, color = TvStatsTextSecondary)
-                        }
-                    } else if (sp.vesa.isNotEmpty()) {
-                        Text("VESA: ${sp.vesa}", fontSize = 13.sp, color = TvStatsGreen, fontWeight = FontWeight.Medium)
-                    }
                 }
             }
         }
@@ -254,11 +239,11 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
             onClick = {
                 val product = selectedProduct ?: return@Button
                 onSaleAdded(Sale(product.name, product.price, currentEmployee,
-                    productId = product.id, productUrl = product.url, vesa = product.vesa))
+                    productId = product.id, productUrl = product.url))
                 message = "Добавлено: ${product.name}"
                 query = ""; selectedProduct = null
             },
-            enabled = selectedProduct != null && !fetchingVesa,
+            enabled = selectedProduct != null,
             modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary)
         ) {
@@ -299,9 +284,6 @@ fun SalesScreen(sales: List<Sale>, onDelete: (Sale) -> Unit, onUpdate: (Sale, Sa
                                     Text(sale.model, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = TvStatsText)
                                     Text("ТВ: ${moneyFormat.format(sale.price)} BYN · ${sale.employee}",
                                         fontSize = 13.sp, color = TvStatsPrimary, fontWeight = FontWeight.Bold)
-                                    if (sale.vesa.isNotEmpty()) {
-                                        Text("VESA: ${sale.vesa}", fontSize = 11.sp, color = TvStatsGreen)
-                                    }
                                 }
                                 IconButton(onClick = { onDelete(sale) }) {
                                     Icon(Icons.Default.Delete, "Удалить", tint = TvStatsRed)
@@ -344,11 +326,8 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
     var searchResults by remember { mutableStateOf(listOf<FiveElementProduct>()) }
     var searching by remember { mutableStateOf(false) }
     var searchMode by remember { mutableStateOf("bracket") }
-    var priceFromInput by remember { mutableStateOf("") }
-    var priceToInput by remember { mutableStateOf("") }
     var warrantyOptions by remember { mutableStateOf(listOf<WarrantyOption>()) }
     var loadingWarranty by remember { mutableStateOf(false) }
-    var vesaFilter by remember { mutableStateOf(true) }
 
     LaunchedEffect(sale.productUrl) {
         if (sale.productUrl.isNotEmpty()) {
@@ -363,23 +342,10 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
         keyboard?.hide()
         searching = true
         scope.launch {
-            var results = if (searchMode == "bracket") {
-                val from = priceFromInput.toIntOrNull()
-                val to = priceToInput.toIntOrNull()
-                PriceRepository.searchBrackets(searchQuery, from, to)
-            } else {
+            searchResults = if (searchMode == "bracket")
+                PriceRepository.searchBrackets(searchQuery)
+            else
                 PriceRepository.searchSoundbars(searchQuery)
-            }
-
-            if (searchMode == "bracket" && vesaFilter && sale.vesa.isNotEmpty()) {
-                val enriched = PriceRepository.enrichBracketsWithVesa(results)
-                val tvVesa = sale.vesa.replace("х", "x").replace(" ", "").lowercase()
-                results = enriched.filter { bracket ->
-                    val bVesa = bracket.vesa.replace("х", "x").replace(" ", "").lowercase()
-                    bVesa.contains(tvVesa)
-                }
-            }
-            searchResults = results
             searching = false
         }
     }
@@ -459,13 +425,6 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     )
                 }
 
-                if (searchMode == "bracket" && sale.vesa.isNotEmpty()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = vesaFilter, onCheckedChange = { vesaFilter = it })
-                        Text("Только с VESA: ${sale.vesa}", fontSize = 13.sp, color = TvStatsGreen)
-                    }
-                }
-
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
@@ -475,28 +434,6 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { doSearch() })
                 )
-
-                if (searchMode == "bracket") {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = priceFromInput,
-                            onValueChange = { new -> priceFromInput = new.filter { it.isDigit() } },
-                            label = { Text("Цена от") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
-                        )
-                        OutlinedTextField(
-                            value = priceToInput,
-                            onValueChange = { new -> priceToInput = new.filter { it.isDigit() } },
-                            label = { Text("Цена до") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Search),
-                            keyboardActions = KeyboardActions(onSearch = { doSearch() })
-                        )
-                    }
-                }
 
                 Button(
                     onClick = { doSearch() },
@@ -509,7 +446,7 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(20.dp), color = TvStatsPrimary)
                         Spacer(Modifier.width(8.dp))
-                        Text("Проверяю VESA...", fontSize = 12.sp, color = TvStatsTextSecondary)
+                        Text("Ищу...", fontSize = 12.sp, color = TvStatsTextSecondary)
                     }
                 }
 
@@ -517,15 +454,11 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     Card(Modifier.fillMaxWidth().clickable {
                         accessories.add(AccessoryItem(prod.name, prod.price))
                         searchResults = emptyList(); searchQuery = ""
-                        priceFromInput = ""; priceToInput = ""
                     }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
                         Column(Modifier.padding(8.dp)) {
                             Text(prod.name, fontSize = 13.sp, color = TvStatsText)
                             Text("${moneyFormat.format(prod.price)} BYN", color = TvStatsPrimary,
                                 fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            if (prod.vesa.isNotEmpty()) {
-                                Text("VESA: ${prod.vesa}", fontSize = 11.sp, color = TvStatsGreen)
-                            }
                         }
                     }
                 }
@@ -661,7 +594,7 @@ fun SettingsScreen(
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
-                Text("Версия: 1.3.0", fontSize = 14.sp, color = TvStatsTextSecondary)
+                Text("Версия: 1.4.0", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Разработчик: Матранг", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Источник: 5element.by", fontSize = 14.sp, color = TvStatsTextSecondary)
