@@ -25,32 +25,29 @@ object OcrHelper {
         }
 
     /**
-     * Умное извлечение модели телевизора из распознанного текста.
-     * Алгоритм:
-     * 1. Убираем мусорные строки (VOLTAGE, WEIGHT, ART, S/NO, W/O и т.д.)
-     * 2. Приоритет 1: строка сразу ПОСЛЕ слова "MODEL"
-     * 3. Приоритет 2: строка сразу ПОСЛЕ бренда (TCL, LG, Hisense, Samsung, Quantum)
-     * 4. Приоритет 3: первые 5 строк с паттерном модели
-     * 5. Приоритет 4: любой паттерн модели в тексте
+     * Умное извлечение модели телевизора.
+     * Учитывает специфику этикеток LG, Quantum, Samsung, TCL, Hisense.
      */
     fun extractModel(text: String): String {
-        val lines = text.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+        val rawLines = text.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+        val upperLines = rawLines.map { it.uppercase() }
 
-        // Чёрный список слов-мусора
+        // === ШАГ 1: Ищем бренд, чтобы понять логику ===
+        val isLG = upperLines.any { it.contains("LG") || it.contains("S/N : 609") || it.contains("ABYGLJU") }
+        val isQuantum = upperLines.any { it.contains("QUANTUM") }
+        val isSamsung = upperLines.any { it.contains("SAMSUNG") || it.contains("S/N:") }
+        val isTCL = upperLines.any { it.contains("TCL") }
+        val isHisense = upperLines.any { it.contains("HISENSE") }
+
+        // === ШАГ 2: ЖЕСТКИЙ ЧЁРНЫЙ СПИСОК (игнорируем эти строки) ===
         val blacklist = listOf(
-            "VOLTAGE", "WEIGHT", "DIMENSIONS", "ART", "S/NO", "W/O", "DATE",
-            "SERIAL", "MODEL", "SERIES", "NET", "GROSS", "NET/GROSS",
-            "КГ", "ММ", "ВТ", "HZ", "MM", "KG", "SERIES", "СЕРИЯ",
-            "СДЕЛАНО", "ИЗГОТОВИТЕЛЬ", "ПРОИЗВОДИТЕЛЬ", "ИМПОРТЕР",
-            "ГАРАНТИЙНЫЙ", "СЕРВИСНЫЙ", "АДРЕС", "ТЕЛ", "EAC", "TPB",
-            "HDMI", "USB", "HDCP", "WEBOS", "TIZEN", "ANDROID",
-            "СМАРТ", "СМАРТ", "ТЕЛЕВИЗОР", "ТЕЛЕВИЗОР", "ТЕЛЕДИДАР"
-        )
-
-        // Паттерн модели: [диагональ][буквы][цифры/буквы]
-        // Примеры: 55P79L, 55E7QRU, 55QNED72B6B, 32S59K, 75MQLED70K, 24H6BQ
-        val modelPattern = Pattern.compile(
-            "(?<![A-Z0-9])(\\d{2})([A-Z]{0,5}\\d{0,5}[A-Z0-9]{0,10})(?![A-Z0-9])"
+            "S/N", "SERIAL", "W/O", "DATE", "VOLTAGE", "WEIGHT", "DIMENSIONS",
+            "КГ", "ММ", "ВТ", "HZ", "ГАРАНТИЙНЫЙ", "СЕРВИСНЫЙ", "АДРЕС",
+            "ТЕЛ", "EAC", "TPB", "HDMI", "USB", "HDCP", "WEBOS", "TIZEN",
+            "ANDROID", "СМАРТ", "ТЕЛЕВИЗОР", "ТЕЛЕДИДАР", "ИЗГОТОВИТЕЛЬ",
+            "ПРОИЗВОДИТЕЛЬ", "ИМПОРТЕР", "СДЕЛАНО", "РОССИЯ", "БЕЛАРУСЬ",
+            "ПРОИЗВОДСТВЕННАЯ", "ПЛОЩАДКА", "ООО", "ГРУППА", "КОМПАНИЙ",
+            "ИНФОРМАЦИОННЫЙ", "ЦЕНТР", "БЕСПЛАТНЫЙ", "ЗВОНОК", "СВЯЗЬ"
         )
 
         fun isCleanModel(s: String): Boolean {
@@ -59,63 +56,75 @@ object OcrHelper {
             if (blacklist.any { upper.contains(it) }) return false
             if (!upper.any { it.isDigit() }) return false
             if (!upper.any { it.isLetter() }) return false
+            // Отсекаем длинные строки, похожие на S/N (15+ символов с хаотичным набором)
+            if (upper.length > 15 && upper.count { it.isDigit() } > 10) return false
             return true
         }
 
-        fun cleanToModel(raw: String): String {
-            // Убираем точки и суффиксы типа .ABYGLJU
-            var cleaned = raw.trim().uppercase()
-                .replace(" ", "")
-                .replace(".", "")
-                .replace("-", "")
-            // Отсекаем всё после последнего разумного блока (модели обычно до 15 символов)
-            if (cleaned.length > 15) {
-                // Пытаемся взять начало до 15 символов, но с проверкой паттерна
-                val m = modelPattern.matcher(cleaned)
-                if (m.find()) cleaned = m.group(0)
-            }
-            return cleaned
-        }
-
-        // === ПРИОРИТЕТ 1: строка после слова MODEL ===
-        for (i in lines.indices) {
-            if (lines[i].uppercase().trim() == "MODEL" || lines[i].uppercase().startsWith("MODEL")) {
-                if (i + 1 < lines.size) {
-                    val candidate = cleanToModel(lines[i + 1])
-                    if (isCleanModel(candidate)) return candidate
-                }
-                // Если "MODEL" и модель на одной строке
-                val afterModel = lines[i].uppercase().replace("MODEL", "").trim()
-                if (afterModel.isNotEmpty()) {
-                    val candidate = cleanToModel(afterModel)
-                    if (isCleanModel(candidate)) return candidate
+        // === ШАГ 3: ОСОБЫЙ ПОИСК ДЛЯ QUANTUM ===
+        if (isQuantum) {
+            for (i in rawLines.indices) {
+                if (rawLines[i].contains("Quantum", ignoreCase = true)) {
+                    // Модель может быть на этой же строке или на следующей
+                    val sameLine = rawLines[i].replace("Quantum", "", ignoreCase = true).trim()
+                    if (sameLine.isNotEmpty() && isCleanModel(sameLine)) return sameLine.uppercase()
+                    if (i + 1 < rawLines.size && isCleanModel(rawLines[i + 1])) return rawLines[i + 1].uppercase()
                 }
             }
+            // Если не нашли рядом с Quantum, ищем паттерн 24H6BQ
+            val quantumPattern = Pattern.compile("(\\d{2}[A-Z]\\d[A-Z]{2})")
+            val m = quantumPattern.matcher(text.uppercase().replace(" ", ""))
+            if (m.find()) return m.group(0)
         }
 
-        // === ПРИОРИТЕТ 2: строка после бренда ===
-        val brands = listOf("TCL", "LG", "SAMSUNG", "HISENSE", "QUANTUM", "SONY", "PHILIPS", "XIAOMI")
-        for (i in lines.indices) {
-            val upperLine = lines[i].uppercase()
-            if (brands.any { upperLine == it || upperLine.startsWith("$it ") }) {
-                if (i + 1 < lines.size) {
-                    val candidate = cleanToModel(lines[i + 1])
+        // === ШАГ 4: ОСОБЫЙ ПОИСК ДЛЯ LG ===
+        if (isLG) {
+            // LG: модель обычно 55QNED72B6B или 55UR91006LA
+            // S/N выглядит как 609RADC65786 — игнорируем длинные строки без букв перед цифрами
+            for (line in rawLines) {
+                val upper = line.uppercase()
+                // Пропускаем S/N
+                if (upper.contains("S/N") || upper.contains("SERIAL")) continue
+                // Ищем паттерн: цифры + буквы + цифры/буквы
+                val lgPattern = Pattern.compile("(\\d{2})([A-Z]{2,5}\\d{0,5}[A-Z0-9]{0,5})")
+                val matcher = lgPattern.matcher(upper.replace(" ", ""))
+                if (matcher.find()) {
+                    val candidate = matcher.group(0)
                     if (isCleanModel(candidate)) return candidate
                 }
             }
         }
 
-        // === ПРИОРИТЕТ 3: первые 5 строк с паттерном ===
-        for (i in 0 until minOf(5, lines.size)) {
-            val m = modelPattern.matcher(lines[i].uppercase())
+        // === ШАГ 5: СТАНДАРТНЫЙ ПОИСК (Samsung, TCL, Hisense) ===
+        // 1. Строка после слова MODEL
+        for (i in rawLines.indices) {
+            if (upperLines[i] == "MODEL" || upperLines[i].startsWith("MODEL")) {
+                val sameLine = upperLines[i].replace("MODEL", "").trim()
+                if (sameLine.isNotEmpty() && isCleanModel(sameLine)) return sameLine
+                if (i + 1 < rawLines.size && isCleanModel(rawLines[i + 1])) return rawLines[i + 1].uppercase()
+            }
+        }
+
+        // 2. Строка после бренда
+        val brands = listOf("TCL", "SAMSUNG", "HISENSE", "SONY", "PHILIPS", "XIAOMI")
+        for (i in rawLines.indices) {
+            if (brands.any { upperLines[i].startsWith(it) }) {
+                if (i + 1 < rawLines.size && isCleanModel(rawLines[i + 1])) return rawLines[i + 1].uppercase()
+            }
+        }
+
+        // 3. Первые 5 строк с паттерном модели
+        val modelPattern = Pattern.compile("(?<![A-Z0-9])(\\d{2})([A-Z]{0,5}\\d{0,5}[A-Z0-9]{0,10})(?![A-Z0-9])")
+        for (i in 0 until minOf(5, rawLines.size)) {
+            val m = modelPattern.matcher(upperLines[i])
             while (m.find()) {
                 val candidate = m.group(0)
                 if (isCleanModel(candidate)) return candidate
             }
         }
 
-        // === ПРИОРИТЕТ 4: любой паттерн в тексте ===
-        val allText = lines.joinToString(" ").uppercase()
+        // 4. Любой паттерн в тексте
+        val allText = upperLines.joinToString(" ")
         val m = modelPattern.matcher(allText)
         while (m.find()) {
             val candidate = m.group(0)
