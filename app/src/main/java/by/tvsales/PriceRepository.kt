@@ -7,6 +7,7 @@ import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.URLEncoder
+import java.util.regex.Pattern
 
 // === Модели для Diginetica ===
 @Serializable
@@ -42,24 +43,30 @@ data class FiveElementProduct(
     val url: String = ""
 )
 
-// === Готовые списки аксессуаров и сервисов ===
-data class AccessoryItem(
-    val name: String,
-    val price: Double
-)
+// === Аксессуары и сервисы ===
+data class AccessoryItem(val name: String, val price: Double)
+data class ServiceItem(val name: String, val price: Double)
 
-data class ServiceItem(
-    val name: String,
-    val price: Double
-)
+// Доп. гарантия — теперь приходит с карточки товара
+data class WarrantyOption(val years: Int, val price: Double)
 
-// Видеосервисы — фиксированные цены (с 5element.by)
+// Видеосервисы — полный список с 5element.by
 val videoServices = listOf(
+    // iTV
     ServiceItem("iTV 6 мес", 89.90),
     ServiceItem("iTV 12 мес", 169.90),
     ServiceItem("iTV 24 мес", 349.90),
-    ServiceItem("iTV 36 мес", 499.90)
-    // Кинопоиск и Okko добавим позже, когда уточнишь цены
+    ServiceItem("iTV 36 мес", 499.90),
+    // Кинопоиск
+    ServiceItem("Кинопоиск 6 мес", 99.90),
+    ServiceItem("Кинопоиск 12 мес", 179.90),
+    ServiceItem("Кинопоиск 24 мес", 329.90),
+    ServiceItem("Кинопоиск 36 мес", 449.90),
+    // Okko
+    ServiceItem("Okko 6 мес", 94.90),
+    ServiceItem("Okko 12 мес", 174.90),
+    ServiceItem("Okko 24 мес", 324.90),
+    ServiceItem("Okko 36 мес", 444.90)
 )
 
 object PriceRepository {
@@ -69,7 +76,7 @@ object PriceRepository {
     private const val DIGINETICA_API_KEY = "08IE0509XQ"
     private const val DIGINETICA_URL = "https://autocomplete.diginetica.net/autocomplete"
 
-    // 🔍 Поиск телевизоров (как было)
+    // 🔍 Поиск телевизоров
     suspend fun searchTVs(query: String): List<FiveElementProduct> = withContext(Dispatchers.IO) {
         if (query.length < 1) return@withContext emptyList()
         try {
@@ -93,7 +100,6 @@ object PriceRepository {
             val resp = client.newCall(req).execute()
             if (!resp.isSuccessful) return@withContext emptyList()
             val body = resp.body?.string() ?: return@withContext emptyList()
-
             val parsed = json.decodeFromString<DigineticaResponse>(body)
 
             parsed.products
@@ -117,7 +123,7 @@ object PriceRepository {
         }
     }
 
-    // 🔍 Поиск аксессуаров (саундбары, кронштейны)
+    // 🔍 Поиск аксессуаров
     suspend fun searchAccessories(query: String): List<FiveElementProduct> = withContext(Dispatchers.IO) {
         if (query.length < 1) return@withContext emptyList()
         try {
@@ -141,10 +147,8 @@ object PriceRepository {
             val resp = client.newCall(req).execute()
             if (!resp.isSuccessful) return@withContext emptyList()
             val body = resp.body?.string() ?: return@withContext emptyList()
-
             val parsed = json.decodeFromString<DigineticaResponse>(body)
 
-            // НЕ фильтруем по «Телевизор» — берём всё, что нашлось
             parsed.products.map { product ->
                 FiveElementProduct(
                     id = product.id,
@@ -161,22 +165,55 @@ object PriceRepository {
         }
     }
 
-    // 💰 Поиск цены конкретной модели
-    suspend fun findPrice(modelName: String): Pair<Double, String>? = withContext(Dispatchers.IO) {
+    // 🛡️ Парсинг доп. гарантии с карточки товара 5element.by
+    // Ищем блок <protection-plus data='[...]'>
+    suspend fun fetchWarranty(productId: String): List<WarrantyOption> = withContext(Dispatchers.IO) {
+        if (productId.isEmpty()) return@withContext emptyList()
         try {
-            val products = searchTVs(modelName)
-            val match = products.firstOrNull {
-                it.name.contains(modelName, ignoreCase = true)
-            } ?: products.firstOrNull()
+            // Формируем URL карточки. ID у нас есть, slug не знаем — используем редирект по ID
+            val url = "https://5element.by/products/$productId"
 
-            match?.let { it.price to "5element.by" }
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                .header("Accept", "text/html")
+                .build()
+
+            val resp = client.newCall(req).execute()
+            if (!resp.isSuccessful) return@withContext emptyList()
+            val html = resp.body?.string() ?: return@withContext emptyList()
+
+            // Ищем protection-plus data='[{...}]'
+            val pattern = Pattern.compile("protection-plus\\s+data='(\\[.*?\\])'", Pattern.DOTALL)
+            val matcher = pattern.matcher(html)
+            if (!matcher.find()) return@withContext emptyList()
+
+            val jsonStr = matcher.group(1) ?: return@withContext emptyList()
+
+            // Парсим вручную (без библиотеки, чтобы не усложнять)
+            val result = mutableListOf<WarrantyOption>()
+            // Ищем {"title":"На N год(а) X.XX ...","price":X}
+            val itemPattern = Pattern.compile(
+                "\\{[^}]*\"title\"\\s*:\\s*\"На\\s+(\\d+)\\s+год[^\"]*?\"[^}]*\"price\"\\s*:\\s*([\\d.]+)",
+                Pattern.DOTALL
+            )
+            val itemMatcher = itemPattern.matcher(jsonStr)
+            while (itemMatcher.find()) {
+                val years = itemMatcher.group(1)?.toIntOrNull() ?: continue
+                val price = itemMatcher.group(2)?.toDoubleOrNull() ?: continue
+                if (years > 0 && price > 0) {
+                    result.add(WarrantyOption(years, price))
+                }
+            }
+
+            result.sortedBy { it.years }
         } catch (e: Exception) {
             e.printStackTrace()
-            null
+            emptyList()
         }
     }
 
-    // 📐 Извлечение диагонали из названия
+    // 📐 Диагональ
     private fun extractDiagonal(name: String): String {
         val pattern = Regex("(\\d{2,3})(?:[A-Z]|\\s|$)")
         val match = pattern.find(name.uppercase())
