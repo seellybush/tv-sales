@@ -74,6 +74,24 @@ data class EmployeePlan(
 
 val employees = listOf("Егор", "Максим", "Вова")
 
+// === ПАМЯТЬ СЕССИИ: последние выбранные аксессуары/сервисы ===
+object SessionMemory {
+    val recentAccessories = mutableStateListOf<AccessoryItem>()
+    val recentServices = mutableStateListOf<ServiceItem>()
+
+    fun rememberAccessory(item: AccessoryItem) {
+        recentAccessories.removeAll { it.name == item.name }
+        recentAccessories.add(0, item)
+        if (recentAccessories.size > 5) recentAccessories.removeAt(recentAccessories.size - 1)
+    }
+
+    fun rememberService(item: ServiceItem) {
+        recentServices.removeAll { it.name == item.name }
+        recentServices.add(0, item)
+        if (recentServices.size > 5) recentServices.removeAt(recentServices.size - 1)
+    }
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
@@ -209,7 +227,6 @@ fun ScanScreen(currentEmployee: String, onEmployeeChange: (String) -> Unit, onSa
                                 query = product.name
                                 suggestions = emptyList()
                                 message = "Выбрано: ${product.name}"
-                                // Фоновый парсинг VESA
                                 scope.launch {
                                     fetchingVesa = true
                                     val vesa = PriceRepository.fetchVesa(product.url)
@@ -349,7 +366,7 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
     var priceToInput by remember { mutableStateOf("") }
     var warrantyOptions by remember { mutableStateOf(listOf<WarrantyOption>()) }
     var loadingWarranty by remember { mutableStateOf(false) }
-    var vesaFilter by remember { mutableStateOf(true) } // фильтр по VESA вкл/выкл
+    var vesaFilter by remember { mutableStateOf(true) }
 
     LaunchedEffect(sale.productUrl) {
         if (sale.productUrl.isNotEmpty()) {
@@ -393,6 +410,24 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 }
 
+                // Память сессии — последние выбранные
+                if (SessionMemory.recentAccessories.isNotEmpty() || SessionMemory.recentServices.isNotEmpty()) {
+                    Card(colors = CardDefaults.cardColors(containerColor = TvStatsGreen.copy(alpha = 0.08f))) {
+                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("⭐ Часто выбираемые:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = TvStatsGreen)
+                            SessionMemory.recentAccessories.take(3).forEach { acc ->
+                                Text("🔊 ${acc.name} · ${moneyFormat.format(acc.price)} BYN",
+                                    fontSize = 11.sp, color = TvStatsTextSecondary)
+                            }
+                            SessionMemory.recentServices.take(3).forEach { svc ->
+                                Text("🎬 ${svc.name} · ${moneyFormat.format(svc.price)} BYN",
+                                    fontSize = 11.sp, color = TvStatsTextSecondary)
+                            }
+                        }
+                    }
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                }
+
                 Text("🛡️ Расширенная гарантия", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsText)
                 if (loadingWarranty) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -406,7 +441,11 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     warrantyOptions.forEach { w ->
                         Card(Modifier.fillMaxWidth().clickable {
                             val name = "Гарантия +${w.years} год"
-                            if (services.none { it.name == name }) services.add(ServiceItem(name, w.price))
+                            val item = ServiceItem(name, w.price)
+                            if (services.none { it.name == name }) {
+                                services.add(item)
+                                SessionMemory.rememberService(item)
+                            }
                         }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
                             Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text("+${w.years} год", Modifier.weight(1f), fontSize = 14.sp,
@@ -434,13 +473,10 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     )
                 }
 
-                // Фильтр по VESA (только если у телевизора есть VESA и выбран режим кронштейнов)
+                // Фильтр по VESA (только для кронштейнов)
                 if (searchMode == "bracket" && sale.vesa.isNotEmpty()) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(
-                            checked = vesaFilter,
-                            onCheckedChange = { vesaFilter = it }
-                        )
+                        Checkbox(checked = vesaFilter, onCheckedChange = { vesaFilter = it })
                         Text("Только с VESA: ${sale.vesa}", fontSize = 13.sp, color = TvStatsGreen)
                     }
                 }
@@ -453,38 +489,41 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                     singleLine = true
                 )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = priceFromInput,
-                        onValueChange = { new -> priceFromInput = new.filter { it.isDigit() } },
-                        label = { Text("Цена от") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
-                    )
-                    OutlinedTextField(
-                        value = priceToInput,
-                        onValueChange = { new -> priceToInput = new.filter { it.isDigit() } },
-                        label = { Text("Цена до") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(onDone = { keyboard?.hide() })
-                    )
+                // Поля цены — только для кронштейнов
+                if (searchMode == "bracket") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = priceFromInput,
+                            onValueChange = { new -> priceFromInput = new.filter { it.isDigit() } },
+                            label = { Text("Цена от") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
+                        )
+                        OutlinedTextField(
+                            value = priceToInput,
+                            onValueChange = { new -> priceToInput = new.filter { it.isDigit() } },
+                            label = { Text("Цена до") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { keyboard?.hide() })
+                        )
+                    }
                 }
 
                 Button(
                     onClick = {
                         searching = true
                         scope.launch {
-                            val from = priceFromInput.toIntOrNull()
-                            val to = priceToInput.toIntOrNull()
-                            var results = if (searchMode == "bracket")
+                            var results = if (searchMode == "bracket") {
+                                val from = priceFromInput.toIntOrNull()
+                                val to = priceToInput.toIntOrNull()
                                 PriceRepository.searchBrackets(searchQuery, from, to)
-                            else
-                                PriceRepository.searchSoundbars(searchQuery, from, to)
+                            } else {
+                                PriceRepository.searchSoundbars(searchQuery)
+                            }
 
-                            // Если ищем кронштейны и включён фильтр VESA — обогащаем и фильтруем
                             if (searchMode == "bracket" && vesaFilter && sale.vesa.isNotEmpty()) {
                                 val enriched = PriceRepository.enrichBracketsWithVesa(results)
                                 val tvVesa = sale.vesa.replace("х", "x").replace(" ", "").lowercase()
@@ -512,7 +551,9 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
 
                 searchResults.forEach { prod ->
                     Card(Modifier.fillMaxWidth().clickable {
-                        accessories.add(AccessoryItem(prod.name, prod.price))
+                        val item = AccessoryItem(prod.name, prod.price)
+                        accessories.add(item)
+                        SessionMemory.rememberAccessory(item)
                         searchResults = emptyList(); searchQuery = ""
                         priceFromInput = ""; priceToInput = ""
                     }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
@@ -532,7 +573,10 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                 Text("🎬 Подписки и сервисы", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsText)
                 videoServices.forEach { svc ->
                     Card(Modifier.fillMaxWidth().clickable {
-                        if (services.none { it.name == svc.name }) services.add(svc)
+                        if (services.none { it.name == svc.name }) {
+                            services.add(svc)
+                            SessionMemory.rememberService(svc)
+                        }
                     }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
                         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(svc.name, Modifier.weight(1f), fontSize = 13.sp, color = TvStatsText)
@@ -658,7 +702,7 @@ fun SettingsScreen(
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
-                Text("Версия: 1.1.0", fontSize = 14.sp, color = TvStatsTextSecondary)
+                Text("Версия: 1.2.0", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Разработчик: Матранг", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Источник: 5element.by", fontSize = 14.sp, color = TvStatsTextSecondary)
