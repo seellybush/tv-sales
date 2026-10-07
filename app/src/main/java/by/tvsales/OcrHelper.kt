@@ -22,7 +22,6 @@ object OcrHelper {
         "JVC", "THOMSON", "KIVI", "BQ", "ЯНДЕКС", "YANDEX", "POLAR"
     )
 
-    // Слова, которые НЕ должны быть внутри слова-модели
     private val noiseSubstrings = listOf(
         "CARTON", "VOLTAGE", "WEIGHT", "GROSS", "DIMENSIONS",
         "S/N", "S/NO", "SERIAL", "W/O", "DATE", "MODEL", "МОДЕЛЬ",
@@ -46,7 +45,6 @@ object OcrHelper {
         }
 
     fun extractModel(text: String): String {
-        // Разбиваем на слова
         val allWords = mutableListOf<String>()
         for (line in text.split("\n")) {
             val cleaned = line.replace(":", " ").replace("|", " ").replace(",", " ")
@@ -84,13 +82,11 @@ object OcrHelper {
 
         fun fixOcr(s: String): String {
             var r = s.uppercase().replace(" ", "").substringBefore(".")
-            // 550NED → 55QNED (Q→0)
             val m = Regex("^(\\d{2})(0)([A-Z].*)$").find(r)
             if (m != null) r = m.groupValues[1] + "Q" + m.groupValues[3]
             return r
         }
 
-        // Паттерн модели: диагональ + буквы/цифры
         val modelPattern = Regex(
             "(2[48]|3[29]|4[0238]|50|5[058]|60|65|70|75|77|83|85|98|100|115)([A-Z]{1,8}\\d{0,5}[A-Z0-9]{0,8})"
         )
@@ -110,8 +106,6 @@ object OcrHelper {
                 if (!isCleanModel(c)) continue
 
                 var priority = 5
-
-                // Приоритет: слово сразу после MODEL/МОДЕЛЬ/Quantum/бренда
                 val textUpper = text.uppercase()
                 val wordPos = textUpper.indexOf(word.uppercase())
                 val before = if (wordPos > 0) textUpper.substring(0, wordPos) else ""
@@ -133,7 +127,6 @@ object OcrHelper {
             .firstOrNull()?.value ?: ""
     }
 
-    // Варианты для поиска (OCR-ошибки)
     fun generateSearchVariants(model: String): List<String> {
         val variants = mutableListOf(model)
         if (model.contains("8")) variants.add(model.replace("8", "B"))
