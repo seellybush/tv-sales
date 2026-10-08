@@ -18,7 +18,7 @@ data class SaleData(
     val model: String = "",
     val price: Double = 0.0,
     val employee: String = "",
-    val category: String = "tovar", // tovar / aks / service
+    val category: String = "tovar",
     val productId: String = "",
     val productUrl: String = "",
     val accessories: List<AccessoryItem> = emptyList(),
@@ -55,7 +55,7 @@ object DataStoreManager {
         context.dataStore.data.map { prefs ->
             val raw = prefs[STATE_KEY] ?: return@map defaultState
             try {
-                json.decodeFromString<AppState>(raw)
+                json.decodeFromString(AppState.serializer(), raw)
             } catch (e: Exception) {
                 e.printStackTrace()
                 defaultState
@@ -64,7 +64,7 @@ object DataStoreManager {
 
     suspend fun saveState(context: Context, state: AppState) {
         try {
-            val raw = json.encodeToString(state)
+            val raw = json.encodeToString(AppState.serializer(), state)
             context.dataStore.edit { prefs ->
                 prefs[STATE_KEY] = raw
             }
