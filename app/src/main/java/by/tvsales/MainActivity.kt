@@ -60,15 +60,17 @@ data class Sale(
     val model: String,
     val price: Double,
     val employee: String,
-    val category: String = "tovar", // tovar / aks / service
+    val category: String = "tovar",
     val productId: String = "",
     val productUrl: String = "",
     val accessories: List<AccessoryItem> = emptyList(),
     val services: List<ServiceItem> = emptyList()
 ) {
     val total: Double get() = price + accessories.sumOf { it.price } + services.sumOf { it.price }
-    val accessorySum: Double get() = accessories.sumOf { it.price }
-    val serviceSum: Double get() = services.sumOf { it.price }
+    val accessorySum: Double
+        get() = accessories.sumOf { it.price } + (if (category == "aks") price else 0.0)
+    val serviceSum: Double
+        get() = services.sumOf { it.price } + (if (category == "service") price else 0.0)
 }
 
 data class EmployeePlan(
@@ -97,13 +99,11 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun App() {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
     var tab by remember { mutableIntStateOf(0) }
     var state by remember { mutableStateOf(DataStoreManager.defaultState) }
     var loaded by remember { mutableStateOf(false) }
 
-    // Загрузка состояния
     LaunchedEffect(Unit) {
         DataStoreManager.getState(context).collect { s ->
             state = s
@@ -111,7 +111,6 @@ fun App() {
         }
     }
 
-    // Сохранение при изменении
     LaunchedEffect(state, loaded) {
         if (loaded) {
             DataStoreManager.saveState(context, state)
@@ -190,11 +189,14 @@ fun App() {
                     sales = state.sales.map { it.toSale() },
                     employees = employees,
                     onDelete = { sale ->
-                        state = state.copy(sales = state.sales.filter { it.model != sale.model || it.price != sale.price })
+                        state = state.copy(sales = state.sales.filter {
+                            !(it.model == sale.model && it.price == sale.price && it.employee == sale.employee)
+                        })
                     },
                     onUpdate = { old, new ->
                         state = state.copy(sales = state.sales.map {
-                            if (it.model == old.model && it.price == old.price) new.toSaleData() else it
+                            if (it.model == old.model && it.price == old.price && it.employee == old.employee)
+                                new.toSaleData() else it
                         })
                     }
                 )
@@ -214,7 +216,6 @@ fun App() {
     }
 }
 
-// ===== ПРЕОБРАЗОВАНИЯ =====
 fun Sale.toSaleData(): SaleData = SaleData(
     model = model, price = price, employee = employee, category = category,
     productId = productId, productUrl = productUrl,
@@ -227,7 +228,7 @@ fun SaleData.toSale(): Sale = Sale(
     accessories = accessories, services = services
 )
 
-// ===== ГЛАВНЫЙ ЭКРАН =====
+// ===== ПАРСЕР =====
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScanScreen(
@@ -246,12 +247,10 @@ fun ScanScreen(
     var message by remember { mutableStateOf("Введите модель телевизора") }
     var showCamera by remember { mutableStateOf(false) }
 
-    // Иной товар
     var otherQuery by remember { mutableStateOf("") }
     var otherSuggestions by remember { mutableStateOf(listOf<FiveElementProduct>()) }
     var selectedOther by remember { mutableStateOf<FiveElementProduct?>(null) }
-    var selectedCategory by remember { mutableStateOf("aks") } // aks / tovar
-    var showOtherPanel by remember { mutableStateOf(false) }
+    var selectedCategory by remember { mutableStateOf("aks") }
 
     fun hideKeyboard() {
         keyboard?.hide()
@@ -308,7 +307,14 @@ fun ScanScreen(
         return
     }
 
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp)
+            .padding(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
         // === 1. МОДЕЛЬ ТВ ===
         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
@@ -381,11 +387,25 @@ fun ScanScreen(
                             }
                         }
                     }
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            val emp = currentEmployee.ifEmpty { employees.firstOrNull() ?: "" }
+                            onSaleAdded(Sale(model = sp.name, price = sp.price, employee = emp,
+                                category = "tovar", productId = sp.id, productUrl = sp.url))
+                        },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary)
+                    ) {
+                        Icon(Icons.Default.Add, null); Spacer(Modifier.width(6.dp))
+                        Text("Добавить телевизор")
+                    }
                 }
             }
         }
 
-        // === 2. ПОИСК ИНОГО ТОВАРА ===
+        // === 2. ИНОЙ ТОВАР / АКС / СЕРВИС ===
         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
@@ -415,7 +435,7 @@ fun ScanScreen(
                 OutlinedTextField(
                     value = otherQuery,
                     onValueChange = { otherQuery = it; selectedOther = null },
-                    label = { Text("Например: наушники, холодильник, порошок") },
+                    label = { Text("Например: наушники, холодильник") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     singleLine = true,
@@ -441,8 +461,8 @@ fun ScanScreen(
                             }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
                                 Column(Modifier.padding(12.dp)) {
                                     Text(product.name, fontWeight = FontWeight.Medium, fontSize = 13.sp, color = TvStatsText)
-                                    Text("${moneyFormat.format(product.price)} BYN · ${if (product.category == "aks") "Акс" else "Товар"}",
-                                        color = TvStatsPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text("${moneyFormat.format(product.price)} BYN", color = TvStatsPrimary,
+                                        fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -467,20 +487,14 @@ fun ScanScreen(
                     Button(
                         onClick = {
                             val emp = currentEmployee.ifEmpty { employees.firstOrNull() ?: "" }
-                            onSaleAdded(
-                                Sale(
-                                    model = sp.name,
-                                    price = sp.price,
-                                    employee = emp,
-                                    category = selectedCategory,
-                                    productId = sp.id,
-                                    productUrl = sp.url
-                                )
-                            )
+                            onSaleAdded(Sale(model = sp.name, price = sp.price, employee = emp,
+                                category = selectedCategory, productId = sp.id, productUrl = sp.url))
                             selectedOther = null; otherQuery = ""
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = TvStatsOrange),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (selectedCategory == "aks") TvStatsOrange else TvStatsPrimary
+                        ),
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Icon(Icons.Default.Add, null); Spacer(Modifier.width(6.dp))
@@ -492,10 +506,13 @@ fun ScanScreen(
                 HorizontalDivider()
                 Spacer(Modifier.height(8.dp))
 
-                // Быстрое добавление сервиса
-                Text("Добавить сервис", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsText)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Subscriptions, null, tint = TvStatsPrimary, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Добавить сервис", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsText)
+                }
                 Spacer(Modifier.height(6.dp))
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 120.dp)) {
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 200.dp)) {
                     items(videoServices.size) { i ->
                         val svc = videoServices[i]
                         Card(Modifier.fillMaxWidth().padding(vertical = 2.dp).clickable {
@@ -535,32 +552,10 @@ fun ScanScreen(
             }
         }
 
-        // === 4. ДОБАВИТЬ ТВ ===
-        if (selectedProduct != null) {
-            Button(
-                onClick = {
-                    val product = selectedProduct ?: return@Button
-                    val emp = currentEmployee.ifEmpty { employees.firstOrNull() ?: "" }
-                    onSaleAdded(
-                        Sale(
-                            model = product.name, price = product.price, employee = emp,
-                            category = "tovar", productId = product.id, productUrl = product.url
-                        )
-                    )
-                    message = "Добавлено: ${product.name}"
-                    query = ""; selectedProduct = null
-                },
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary)
-            ) {
-                Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp))
-                Text("Добавить ТВ", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-
         Text(message, fontSize = 14.sp, color = TvStatsTextSecondary,
             modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+
+        Spacer(Modifier.height(24.dp))
     }
 }
 
@@ -745,10 +740,7 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                                 }
                             }
                             services.forEachIndexed { i, svc ->
-                                val ic = when {
-                                    svc.name.startsWith("Гарантия") -> Icons.Default.VerifiedUser
-                                    else -> Icons.Default.Subscriptions
-                                }
+                                val ic = if (svc.name.startsWith("Гарантия")) Icons.Default.VerifiedUser else Icons.Default.Subscriptions
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(ic, null, tint = TvStatsPrimary, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(6.dp))
@@ -915,7 +907,6 @@ fun SettingsScreen(
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
 
-    // Статистика брендов
     val brandCounts = mutableMapOf<String, Int>()
     var otherCount = 0
     sales.filter { it.category == "tovar" && it.model.contains("Телевизор", ignoreCase = true) }
@@ -935,7 +926,6 @@ fun SettingsScreen(
         Text("Результат сотрудника", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TvStatsText)
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
 
-        // === СТАТИСТИКА БРЕНДОВ ===
         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
@@ -955,10 +945,9 @@ fun SettingsScreen(
             }
         }
 
-        // === СОТРУДНИКИ ===
         employees.forEachIndexed { empIndex, name ->
             val employeeSales = sales.filter { it.employee == name }
-            val factProduct = employeeSales.sumOf { it.price }
+            val factProduct = employeeSales.filter { it.category == "tovar" }.sumOf { it.price }
             val factAccessories = employeeSales.sumOf { it.accessorySum }
             val factService = employeeSales.sumOf { it.serviceSum }
             val brand = employeeBrands[name] ?: ""
@@ -1043,7 +1032,7 @@ fun SettingsScreen(
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
-                Text("Версия: 1.19.0", fontSize = 14.sp, color = TvStatsTextSecondary)
+                Text("Версия: 1.19.1", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Разработчик: Матранг", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Источник: 5element.by", fontSize = 14.sp, color = TvStatsTextSecondary)
@@ -1051,7 +1040,6 @@ fun SettingsScreen(
         }
     }
 
-    // Диалог изменения имени
     editingEmployeeIndex?.let { idx ->
         AlertDialog(
             onDismissRequest = { editingEmployeeIndex = null },
@@ -1067,7 +1055,6 @@ fun SettingsScreen(
                         val oldName = newList[idx]
                         newList[idx] = editingName.trim()
                         onEmployeesChange(newList)
-                        // Обновляем бренд
                         val newBrands = employeeBrands.toMutableMap()
                         employeeBrands[oldName]?.let { newBrands[editingName.trim()] = it }
                         newBrands.remove(oldName)
@@ -1080,7 +1067,6 @@ fun SettingsScreen(
         )
     }
 
-    // Диалог изменения бренда
     editingBrandIndex?.let { idx ->
         AlertDialog(
             onDismissRequest = { editingBrandIndex = null },
@@ -1116,7 +1102,6 @@ fun SettingsScreen(
     }
 }
 
-// ===== ОПРЕДЕЛЕНИЕ БРЕНДА =====
 fun detectBrand(modelName: String): String {
     val u = modelName.uppercase()
     return when {
@@ -1133,7 +1118,6 @@ fun detectBrand(modelName: String): String {
     }
 }
 
-// ===== МЕТРИКА =====
 @Composable
 fun MetricRow(title: String, fact: Double, plan: Double) {
     val percent = if (plan > 0) (fact / plan * 100).coerceAtMost(999.0) else 0.0
