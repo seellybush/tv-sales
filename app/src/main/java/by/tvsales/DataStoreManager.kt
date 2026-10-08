@@ -8,39 +8,68 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "tv_stats_prefs")
 
+@Serializable
+data class SaleData(
+    val model: String = "",
+    val price: Double = 0.0,
+    val employee: String = "",
+    val category: String = "tovar", // tovar / aks / service
+    val productId: String = "",
+    val productUrl: String = "",
+    val accessories: List<AccessoryItem> = emptyList(),
+    val services: List<ServiceItem> = emptyList()
+)
+
+@Serializable
+data class PlanData(
+    val product: Double = 0.0,
+    val accessories: Double = 0.0,
+    val service: Double = 0.0
+)
+
+@Serializable
+data class AppState(
+    val employees: List<String> = listOf("Дядя Жора", "Максимыч", "Дядя Володя"),
+    val sales: List<SaleData> = emptyList(),
+    val plans: Map<String, PlanData> = emptyMap(),
+    val employeeBrands: Map<String, String> = mapOf(
+        "Дядя Жора" to "TCL",
+        "Максимыч" to "Quantum",
+        "Дядя Володя" to "LG"
+    )
+)
+
 object DataStoreManager {
 
-    private val EMPLOYEES_KEY = stringPreferencesKey("employees")
-    private val SALES_KEY = stringPreferencesKey("sales")
-    private val PLANS_KEY = stringPreferencesKey("plans")
+    private val STATE_KEY = stringPreferencesKey("app_state")
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true; prettyPrint = false }
 
-    val defaultEmployees = listOf("Дядя Жора", "Максимыч", "Дядя Володя")
+    val defaultState = AppState()
 
-    fun getEmployees(context: Context): Flow<List<String>> =
+    fun getState(context: Context): Flow<AppState> =
         context.dataStore.data.map { prefs ->
-            prefs[EMPLOYEES_KEY]?.split("|")?.filter { it.isNotBlank() } ?: defaultEmployees
+            val raw = prefs[STATE_KEY] ?: return@map defaultState
+            try {
+                json.decodeFromString<AppState>(raw)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                defaultState
+            }
         }
 
-    suspend fun saveEmployees(context: Context, employees: List<String>) {
-        context.dataStore.edit { prefs ->
-            prefs[EMPLOYEES_KEY] = employees.joinToString("|")
+    suspend fun saveState(context: Context, state: AppState) {
+        try {
+            val raw = json.encodeToString(state)
+            context.dataStore.edit { prefs ->
+                prefs[STATE_KEY] = raw
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-    }
-
-    fun getSales(context: Context): Flow<String> =
-        context.dataStore.data.map { prefs -> prefs[SALES_KEY] ?: "" }
-
-    suspend fun saveSales(context: Context, salesJson: String) {
-        context.dataStore.edit { prefs -> prefs[SALES_KEY] = salesJson }
-    }
-
-    fun getPlans(context: Context): Flow<String> =
-        context.dataStore.data.map { prefs -> prefs[PLANS_KEY] ?: "" }
-
-    suspend fun savePlans(context: Context, plansJson: String) {
-        context.dataStore.edit { prefs -> prefs[PLANS_KEY] = plansJson }
     }
 }
