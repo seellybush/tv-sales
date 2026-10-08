@@ -12,8 +12,8 @@ android {
         applicationId = "by.tvsales"
         minSdk = 26
         targetSdk = 35
-        versionCode = 17
-        versionName = "1.17.0"
+        versionCode = 18
+        versionName = "1.18.0"
     }
     buildFeatures { compose = true }
     compileOptions {
@@ -36,6 +36,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.0")
     implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
     val cameraxVersion = "1.4.1"
     implementation("androidx.camera:camera-core:$cameraxVersion")
     implementation("androidx.camera:camera-camera2:$cameraxVersion")
