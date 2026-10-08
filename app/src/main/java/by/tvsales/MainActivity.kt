@@ -57,6 +57,7 @@ val moneyFormat: NumberFormat = NumberFormat.getNumberInstance(Locale("be", "BY"
 }
 
 data class Sale(
+    val id: Long = System.currentTimeMillis() + (0..999).random(),
     val model: String,
     val price: Double,
     val employee: String,
@@ -189,14 +190,11 @@ fun App() {
                     sales = state.sales.map { it.toSale() },
                     employees = employees,
                     onDelete = { sale ->
-                        state = state.copy(sales = state.sales.filter {
-                            !(it.model == sale.model && it.price == sale.price && it.employee == sale.employee)
-                        })
+                        state = state.copy(sales = state.sales.filter { it.id != sale.id })
                     },
                     onUpdate = { old, new ->
                         state = state.copy(sales = state.sales.map {
-                            if (it.model == old.model && it.price == old.price && it.employee == old.employee)
-                                new.toSaleData() else it
+                            if (it.id == old.id) new.toSaleData() else it
                         })
                     }
                 )
@@ -217,18 +215,18 @@ fun App() {
 }
 
 fun Sale.toSaleData(): SaleData = SaleData(
-    model = model, price = price, employee = employee, category = category,
+    id = id, model = model, price = price, employee = employee, category = category,
     productId = productId, productUrl = productUrl,
     accessories = accessories, services = services
 )
 
 fun SaleData.toSale(): Sale = Sale(
+    id = if (id == 0L) System.currentTimeMillis() + (0..999).random() else id,
     model = model, price = price, employee = employee, category = category,
     productId = productId, productUrl = productUrl,
     accessories = accessories, services = services
 )
 
-// ===== ПАРСЕР =====
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScanScreen(
@@ -315,7 +313,6 @@ fun ScanScreen(
             .padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // === 1. МОДЕЛЬ ТВ ===
         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
@@ -405,7 +402,6 @@ fun ScanScreen(
             }
         }
 
-        // === 2. ИНОЙ ТОВАР / АКС / СЕРВИС ===
         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
@@ -532,7 +528,6 @@ fun ScanScreen(
             }
         }
 
-        // === 3. ПРОДАВЕЦ ===
         var empExpanded by remember { mutableStateOf(false) }
         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
@@ -559,7 +554,6 @@ fun ScanScreen(
     }
 }
 
-// ===== ПРОДАЖИ =====
 @Composable
 fun SalesScreen(
     sales: List<Sale>,
@@ -678,7 +672,6 @@ fun SalesScreen(
     }
 }
 
-// ===== ПАНЕЛЬ АКС / СЕРВИС =====
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
@@ -888,7 +881,6 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
     )
 }
 
-// ===== НАСТРОЙКИ =====
 @Composable
 fun SettingsScreen(
     sales: List<Sale>,
@@ -1032,7 +1024,7 @@ fun SettingsScreen(
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
-                Text("Версия: 1.19.1", fontSize = 14.sp, color = TvStatsTextSecondary)
+                Text("Версия: 1.19.2", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Разработчик: Матранг", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Источник: 5element.by", fontSize = 14.sp, color = TvStatsTextSecondary)
