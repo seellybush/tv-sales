@@ -15,6 +15,7 @@ val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "tv
 
 @Serializable
 data class SaleData(
+    val id: Long = 0L,
     val model: String = "",
     val price: Double = 0.0,
     val employee: String = "",
