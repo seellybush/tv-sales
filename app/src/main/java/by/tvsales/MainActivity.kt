@@ -60,6 +60,7 @@ data class Sale(
     val model: String,
     val price: Double,
     val employee: String,
+    val category: String = "tovar", // tovar / aks / service
     val productId: String = "",
     val productUrl: String = "",
     val accessories: List<AccessoryItem> = emptyList(),
@@ -97,26 +98,32 @@ class MainActivity : ComponentActivity() {
 fun App() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var tab by remember { mutableIntStateOf(0) }
-    var sales by remember { mutableStateOf(listOf<Sale>()) }
-    var currentEmployee by remember { mutableStateOf("") }
-    val employeesFlow = DataStoreManager.getEmployees(context).collectAsState(initial = DataStoreManager.defaultEmployees)
-    val employees = employeesFlow.value
 
+    var tab by remember { mutableIntStateOf(0) }
+    var state by remember { mutableStateOf(DataStoreManager.defaultState) }
+    var loaded by remember { mutableStateOf(false) }
+
+    // Загрузка состояния
+    LaunchedEffect(Unit) {
+        DataStoreManager.getState(context).collect { s ->
+            state = s
+            loaded = true
+        }
+    }
+
+    // Сохранение при изменении
+    LaunchedEffect(state, loaded) {
+        if (loaded) {
+            DataStoreManager.saveState(context, state)
+        }
+    }
+
+    val employees = state.employees
+    var currentEmployee by remember { mutableStateOf("") }
     LaunchedEffect(employees) {
         if (currentEmployee.isEmpty() || currentEmployee !in employees) {
             currentEmployee = employees.firstOrNull() ?: ""
         }
-    }
-
-    var plans by remember {
-        mutableStateOf(
-            mapOf(
-                employees.getOrNull(0) to EmployeePlan(25000.0, 25000.0 * 0.17, 25000.0 * 0.07),
-                employees.getOrNull(1) to EmployeePlan(22000.0, 22000.0 * 0.17, 22000.0 * 0.07),
-                employees.getOrNull(2) to EmployeePlan(20000.0, 20000.0 * 0.17, 20000.0 * 0.07)
-            )
-        )
     }
 
     Scaffold(
@@ -174,28 +181,53 @@ fun App() {
                     employees = employees,
                     currentEmployee = currentEmployee,
                     onEmployeeChange = { currentEmployee = it },
-                    onSaleAdded = { sales = sales + it; tab = 1 }
+                    onSaleAdded = { sale ->
+                        state = state.copy(sales = state.sales + sale.toSaleData())
+                        tab = 1
+                    }
                 )
                 1 -> SalesScreen(
-                    sales = sales,
+                    sales = state.sales.map { it.toSale() },
                     employees = employees,
-                    onDelete = { sale -> sales = sales - sale },
-                    onUpdate = { old, new -> sales = sales.map { if (it == old) new else it } }
+                    onDelete = { sale ->
+                        state = state.copy(sales = state.sales.filter { it.model != sale.model || it.price != sale.price })
+                    },
+                    onUpdate = { old, new ->
+                        state = state.copy(sales = state.sales.map {
+                            if (it.model == old.model && it.price == old.price) new.toSaleData() else it
+                        })
+                    }
                 )
                 2 -> SettingsScreen(
-                    sales = sales,
-                    plans = plans,
+                    sales = state.sales.map { it.toSale() },
+                    plans = state.plans.mapValues { EmployeePlan(it.value.product, it.value.accessories, it.value.service) },
                     employees = employees,
-                    onPlansChange = { newPlans -> plans = newPlans },
-                    onEmployeesChange = { newList ->
-                        scope.launch { DataStoreManager.saveEmployees(context, newList) }
-                    }
+                    employeeBrands = state.employeeBrands,
+                    onPlansChange = { newPlans ->
+                        state = state.copy(plans = newPlans.mapValues { PlanData(it.value.product, it.value.accessories, it.value.service) })
+                    },
+                    onEmployeesChange = { newList -> state = state.copy(employees = newList) },
+                    onBrandsChange = { newBrands -> state = state.copy(employeeBrands = newBrands) }
                 )
             }
         }
     }
 }
 
+// ===== ПРЕОБРАЗОВАНИЯ =====
+fun Sale.toSaleData(): SaleData = SaleData(
+    model = model, price = price, employee = employee, category = category,
+    productId = productId, productUrl = productUrl,
+    accessories = accessories, services = services
+)
+
+fun SaleData.toSale(): Sale = Sale(
+    model = model, price = price, employee = employee, category = category,
+    productId = productId, productUrl = productUrl,
+    accessories = accessories, services = services
+)
+
+// ===== ГЛАВНЫЙ ЭКРАН =====
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScanScreen(
@@ -214,6 +246,13 @@ fun ScanScreen(
     var message by remember { mutableStateOf("Введите модель телевизора") }
     var showCamera by remember { mutableStateOf(false) }
 
+    // Иной товар
+    var otherQuery by remember { mutableStateOf("") }
+    var otherSuggestions by remember { mutableStateOf(listOf<FiveElementProduct>()) }
+    var selectedOther by remember { mutableStateOf<FiveElementProduct?>(null) }
+    var selectedCategory by remember { mutableStateOf("aks") } // aks / tovar
+    var showOtherPanel by remember { mutableStateOf(false) }
+
     fun hideKeyboard() {
         keyboard?.hide()
         focusManager.clearFocus(force = true)
@@ -225,19 +264,12 @@ fun ScanScreen(
             var usedModel = model
             for (variant in OcrHelper.generateSearchVariants(model)) {
                 found = PriceRepository.searchTVs(variant)
-                if (found.isNotEmpty()) {
-                    usedModel = variant
-                    break
-                }
+                if (found.isNotEmpty()) { usedModel = variant; break }
             }
             if (found.isEmpty()) {
-                query = model
-                suggestions = emptyList()
-                message = "Модель не найдена в каталоге"
+                query = model; suggestions = emptyList(); message = "Модель не найдена в каталоге"
             } else {
-                query = usedModel
-                suggestions = found
-                message = "Распознано: $usedModel"
+                query = usedModel; suggestions = found; message = "Распознано: $usedModel"
             }
         }
     }
@@ -250,12 +282,8 @@ fun ScanScreen(
                 message = "Распознаю модель с фото..."
                 val text = OcrHelper.recognizeText(context, uri)
                 val model = OcrHelper.extractModel(text)
-                if (model.isNotEmpty()) {
-                    selectedProduct = null
-                    searchWithVariants(model)
-                } else {
-                    message = "OCR: ${text.replace("\n", " ").take(150)}"
-                }
+                if (model.isNotEmpty()) { selectedProduct = null; searchWithVariants(model) }
+                else { message = "OCR: ${text.replace("\n", " ").take(150)}" }
             }
         }
     }
@@ -263,14 +291,16 @@ fun ScanScreen(
     LaunchedEffect(query) {
         if (query.length >= 3) { delay(600); suggestions = PriceRepository.searchTVs(query) } else suggestions = emptyList()
     }
+    LaunchedEffect(otherQuery) {
+        if (otherQuery.length >= 3) { delay(600); otherSuggestions = PriceRepository.searchOtherProducts(otherQuery) }
+        else otherSuggestions = emptyList()
+    }
 
     if (showCamera) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             CameraScanner(
                 onModelDetected = { model ->
-                    selectedProduct = null
-                    showCamera = false
-                    searchWithVariants(model)
+                    selectedProduct = null; showCamera = false; searchWithVariants(model)
                 },
                 onDismiss = { showCamera = false }
             )
@@ -279,7 +309,7 @@ fun ScanScreen(
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        // === МОДЕЛЬ ===
+        // === 1. МОДЕЛЬ ТВ ===
         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
@@ -291,8 +321,7 @@ fun ScanScreen(
                     shape = RoundedCornerShape(12.dp), singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = {
-                        hideKeyboard()
-                        scope.launch { suggestions = PriceRepository.searchTVs(query) }
+                        hideKeyboard(); scope.launch { suggestions = PriceRepository.searchTVs(query) }
                     }),
                     trailingIcon = {
                         if (query.isNotEmpty()) IconButton(onClick = { query = ""; suggestions = emptyList() }) {
@@ -309,33 +338,25 @@ fun ScanScreen(
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Icon(Icons.Default.PhotoCamera, null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Камера")
+                        Spacer(Modifier.width(6.dp)); Text("Камера")
                     }
                     OutlinedButton(
                         onClick = {
-                            galleryLauncher.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
+                            galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                         },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp)
+                        modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)
                     ) {
                         Icon(Icons.Default.PhotoLibrary, null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Галерея")
+                        Spacer(Modifier.width(6.dp)); Text("Галерея")
                     }
                 }
                 AnimatedVisibility(suggestions.isNotEmpty() && selectedProduct == null) {
-                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 250.dp).padding(top = 8.dp)) {
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 200.dp).padding(top = 8.dp)) {
                         items(suggestions.size) { index ->
                             val product = suggestions[index]
                             Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
-                                hideKeyboard()
-                                selectedProduct = product
-                                query = product.name
-                                suggestions = emptyList()
-                                message = "Выбрано: ${product.name}"
+                                hideKeyboard(); selectedProduct = product; query = product.name
+                                suggestions = emptyList(); message = "Выбрано: ${product.name}"
                             }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
                                 Column(Modifier.padding(12.dp)) {
                                     Text(product.name, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = TvStatsText)
@@ -346,10 +367,155 @@ fun ScanScreen(
                         }
                     }
                 }
+                selectedProduct?.let { sp ->
+                    Spacer(Modifier.height(8.dp))
+                    Card(colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(sp.name, fontSize = 13.sp, color = TvStatsText)
+                                Text("${moneyFormat.format(sp.price)} BYN", color = TvStatsPrimary,
+                                    fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            }
+                            IconButton(onClick = { selectedProduct = null; query = "" }) {
+                                Icon(Icons.Default.Close, "Отмена", tint = TvStatsRed)
+                            }
+                        }
+                    }
+                }
             }
         }
 
-        // === ПРОДАВЕЦ ===
+        // === 2. ПОИСК ИНОГО ТОВАРА ===
+        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
+            elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.ShoppingCart, null, tint = TvStatsPrimary, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Поиск иного товара", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
+                }
+                Spacer(Modifier.height(8.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = selectedCategory == "aks",
+                        onClick = { selectedCategory = "aks" },
+                        label = { Text("Акс") },
+                        leadingIcon = { Icon(Icons.Default.Build, null, modifier = Modifier.size(16.dp)) }
+                    )
+                    FilterChip(
+                        selected = selectedCategory == "tovar",
+                        onClick = { selectedCategory = "tovar" },
+                        label = { Text("Товар") },
+                        leadingIcon = { Icon(Icons.Default.Inventory, null, modifier = Modifier.size(16.dp)) }
+                    )
+                }
+
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = otherQuery,
+                    onValueChange = { otherQuery = it; selectedOther = null },
+                    label = { Text("Например: наушники, холодильник, порошок") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = {
+                        hideKeyboard()
+                        scope.launch { otherSuggestions = PriceRepository.searchOtherProducts(otherQuery) }
+                    }),
+                    trailingIcon = {
+                        if (otherQuery.isNotEmpty()) IconButton(onClick = { otherQuery = ""; otherSuggestions = emptyList() }) {
+                            Icon(Icons.Default.Clear, "Очистить")
+                        }
+                    }
+                )
+
+                AnimatedVisibility(otherSuggestions.isNotEmpty() && selectedOther == null) {
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 200.dp).padding(top = 8.dp)) {
+                        items(otherSuggestions.size) { index ->
+                            val product = otherSuggestions[index]
+                            Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
+                                hideKeyboard(); selectedOther = product; otherQuery = product.name
+                                otherSuggestions = emptyList()
+                            }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
+                                Column(Modifier.padding(12.dp)) {
+                                    Text(product.name, fontWeight = FontWeight.Medium, fontSize = 13.sp, color = TvStatsText)
+                                    Text("${moneyFormat.format(product.price)} BYN · ${if (product.category == "aks") "Акс" else "Товар"}",
+                                        color = TvStatsPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                selectedOther?.let { sp ->
+                    Spacer(Modifier.height(8.dp))
+                    Card(colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(sp.name, fontSize = 13.sp, color = TvStatsText)
+                                Text("${moneyFormat.format(sp.price)} BYN", color = TvStatsPrimary,
+                                    fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            }
+                            IconButton(onClick = { selectedOther = null; otherQuery = "" }) {
+                                Icon(Icons.Default.Close, "Отмена", tint = TvStatsRed)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            val emp = currentEmployee.ifEmpty { employees.firstOrNull() ?: "" }
+                            onSaleAdded(
+                                Sale(
+                                    model = sp.name,
+                                    price = sp.price,
+                                    employee = emp,
+                                    category = selectedCategory,
+                                    productId = sp.id,
+                                    productUrl = sp.url
+                                )
+                            )
+                            selectedOther = null; otherQuery = ""
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = TvStatsOrange),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Add, null); Spacer(Modifier.width(6.dp))
+                        Text("Добавить ${if (selectedCategory == "aks") "акс" else "товар"}")
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(8.dp))
+
+                // Быстрое добавление сервиса
+                Text("Добавить сервис", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsText)
+                Spacer(Modifier.height(6.dp))
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 120.dp)) {
+                    items(videoServices.size) { i ->
+                        val svc = videoServices[i]
+                        Card(Modifier.fillMaxWidth().padding(vertical = 2.dp).clickable {
+                            val emp = currentEmployee.ifEmpty { employees.firstOrNull() ?: "" }
+                            onSaleAdded(Sale(model = svc.name, price = svc.price, employee = emp, category = "service"))
+                        }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
+                            Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Subscriptions, null, tint = TvStatsPrimary, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(svc.name, Modifier.weight(1f), fontSize = 13.sp, color = TvStatsText)
+                                Text("${moneyFormat.format(svc.price)} BYN", color = TvStatsPrimary,
+                                    fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // === 3. ПРОДАВЕЦ ===
         var empExpanded by remember { mutableStateOf(false) }
         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
@@ -369,32 +535,28 @@ fun ScanScreen(
             }
         }
 
-        selectedProduct?.let { sp ->
-            Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
-                elevation = CardDefaults.cardElevation(4.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("Выбрано", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TvStatsTextSecondary)
-                    Text(sp.name, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = TvStatsText)
-                    Text("${moneyFormat.format(sp.price)} BYN", color = TvStatsPrimary,
-                        fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                }
+        // === 4. ДОБАВИТЬ ТВ ===
+        if (selectedProduct != null) {
+            Button(
+                onClick = {
+                    val product = selectedProduct ?: return@Button
+                    val emp = currentEmployee.ifEmpty { employees.firstOrNull() ?: "" }
+                    onSaleAdded(
+                        Sale(
+                            model = product.name, price = product.price, employee = emp,
+                            category = "tovar", productId = product.id, productUrl = product.url
+                        )
+                    )
+                    message = "Добавлено: ${product.name}"
+                    query = ""; selectedProduct = null
+                },
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary)
+            ) {
+                Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp))
+                Text("Добавить ТВ", fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
-        }
-
-        Button(
-            onClick = {
-                val product = selectedProduct ?: return@Button
-                onSaleAdded(Sale(product.name, product.price, currentEmployee,
-                    productId = product.id, productUrl = product.url))
-                message = "Добавлено: ${product.name}"
-                query = ""; selectedProduct = null
-            },
-            enabled = selectedProduct != null,
-            modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary)
-        ) {
-            Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp))
-            Text("Добавить", fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
 
         Text(message, fontSize = 14.sp, color = TvStatsTextSecondary,
@@ -402,6 +564,7 @@ fun ScanScreen(
     }
 }
 
+// ===== ПРОДАЖИ =====
 @Composable
 fun SalesScreen(
     sales: List<Sale>,
@@ -415,35 +578,38 @@ fun SalesScreen(
     Column(Modifier.padding(16.dp)) {
         Text("Статистика продаж", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TvStatsText)
         Spacer(Modifier.height(4.dp))
-        Text("Сумма ТВ: ${moneyFormat.format(sales.sumOf { it.price })} BYN",
+        Text("Всего: ${moneyFormat.format(sales.sumOf { it.total })} BYN",
             fontSize = 18.sp, color = TvStatsPrimary, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(16.dp))
-        Text("Нажми на ТВ, чтобы добавить акс/сервис", fontSize = 13.sp, color = TvStatsTextSecondary)
+        Text("Последние 15 продаж", fontSize = 13.sp, color = TvStatsTextSecondary)
         Spacer(Modifier.height(8.dp))
 
-        val recent = sales.takeLast(5).reversed()
+        val recent = sales.takeLast(15).reversed()
         if (recent.isEmpty()) {
             Text("Пока нет продаж", color = TvStatsTextSecondary, modifier = Modifier.padding(vertical = 16.dp))
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(recent) { sale ->
+                    val catIcon = when (sale.category) {
+                        "aks" -> Icons.Default.Build
+                        "service" -> Icons.Default.Subscriptions
+                        else -> Icons.Default.Inventory
+                    }
                     Card(shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
                         elevation = CardDefaults.cardElevation(1.dp),
                         modifier = Modifier.fillMaxWidth().clickable { selectedSale = sale }) {
                         Column(Modifier.fillMaxWidth().padding(12.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(catIcon, null, tint = TvStatsPrimary, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text(sale.model, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = TvStatsText)
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text("ТВ: ${moneyFormat.format(sale.price)} BYN · ",
+                                        Text("${moneyFormat.format(sale.price)} BYN · ",
                                             fontSize = 13.sp, color = TvStatsPrimary, fontWeight = FontWeight.Bold)
-                                        Text(
-                                            sale.employee,
-                                            fontSize = 13.sp,
-                                            color = TvStatsPrimary,
+                                        Text(sale.employee, fontSize = 13.sp, color = TvStatsPrimary,
                                             fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.clickable { employeeDialogSale = sale }
-                                        )
+                                            modifier = Modifier.clickable { employeeDialogSale = sale })
                                     }
                                 }
                                 IconButton(onClick = { onDelete(sale) }) {
@@ -454,8 +620,7 @@ fun SalesScreen(
                                 Spacer(Modifier.height(4.dp))
                                 sale.accessories.forEach { acc ->
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.Build, null, tint = TvStatsTextSecondary,
-                                            modifier = Modifier.size(12.dp))
+                                        Icon(Icons.Default.Build, null, tint = TvStatsTextSecondary, modifier = Modifier.size(12.dp))
                                         Spacer(Modifier.width(4.dp))
                                         Text("${acc.name} — ${moneyFormat.format(acc.price)} BYN",
                                             fontSize = 11.sp, color = TvStatsTextSecondary)
@@ -465,18 +630,8 @@ fun SalesScreen(
                             if (sale.services.isNotEmpty()) {
                                 Spacer(Modifier.height(2.dp))
                                 sale.services.forEach { svc ->
-                                    val ic = when {
-                                        svc.name.startsWith("Гарантия") -> Icons.Default.VerifiedUser
-                                        svc.name.contains("iTV", true) ||
-                                        svc.name.contains("Кинопоиск", true) ||
-                                        svc.name.contains("Okko", true) ||
-                                        svc.name.contains("VOKA", true) ||
-                                        svc.name.contains("Skipsy", true) -> Icons.Default.Subscriptions
-                                        else -> Icons.Default.Build
-                                    }
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(ic, null, tint = TvStatsTextSecondary,
-                                            modifier = Modifier.size(12.dp))
+                                        Icon(Icons.Default.Subscriptions, null, tint = TvStatsTextSecondary, modifier = Modifier.size(12.dp))
                                         Spacer(Modifier.width(4.dp))
                                         Text("${svc.name} — ${moneyFormat.format(svc.price)} BYN",
                                             fontSize = 11.sp, color = TvStatsTextSecondary)
@@ -506,10 +661,7 @@ fun SalesScreen(
                                 containerColor = if (name == sale.employee) TvStatsPrimary.copy(alpha = 0.15f) else TvStatsBg
                             )
                         ) {
-                            Row(
-                                Modifier.fillMaxWidth().padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                            Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 if (name == sale.employee) {
                                     Icon(Icons.Default.Check, null, tint = TvStatsPrimary, modifier = Modifier.size(20.dp))
                                     Spacer(Modifier.width(8.dp))
@@ -531,6 +683,7 @@ fun SalesScreen(
     }
 }
 
+// ===== ПАНЕЛЬ АКС / СЕРВИС =====
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
@@ -555,13 +708,8 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
     }
 
     fun hideKeyboardNow() {
-        keyboard?.hide()
-        focusManager.clearFocus(force = true)
-        scope.launch {
-            delay(80)
-            keyboard?.hide()
-            focusManager.clearFocus(force = true)
-        }
+        keyboard?.hide(); focusManager.clearFocus(force = true)
+        scope.launch { delay(80); keyboard?.hide(); focusManager.clearFocus(force = true) }
     }
 
     fun doSearch() {
@@ -569,12 +717,9 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
         hideKeyboardNow()
         searching = true
         scope.launch {
-            searchResults = if (searchMode == "bracket")
-                PriceRepository.searchBrackets(searchQuery)
-            else
-                PriceRepository.searchSoundbars(searchQuery)
-            searching = false
-            hideKeyboardNow()
+            searchResults = if (searchMode == "bracket") PriceRepository.searchBrackets(searchQuery)
+            else PriceRepository.searchSoundbars(searchQuery)
+            searching = false; hideKeyboardNow()
         }
     }
 
@@ -593,8 +738,7 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.Build, null, tint = TvStatsPrimary, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("${acc.name} · ${moneyFormat.format(acc.price)} BYN",
-                                        Modifier.weight(1f), fontSize = 12.sp)
+                                    Text("${acc.name} · ${moneyFormat.format(acc.price)} BYN", Modifier.weight(1f), fontSize = 12.sp)
                                     IconButton(onClick = { accessories.removeAt(i) }, modifier = Modifier.size(28.dp)) {
                                         Icon(Icons.Default.Close, "Удалить", tint = TvStatsRed, modifier = Modifier.size(16.dp))
                                     }
@@ -603,18 +747,12 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                             services.forEachIndexed { i, svc ->
                                 val ic = when {
                                     svc.name.startsWith("Гарантия") -> Icons.Default.VerifiedUser
-                                    svc.name.contains("iTV", true) ||
-                                    svc.name.contains("Кинопоиск", true) ||
-                                    svc.name.contains("Okko", true) ||
-                                    svc.name.contains("VOKA", true) ||
-                                    svc.name.contains("Skipsy", true) -> Icons.Default.Subscriptions
-                                    else -> Icons.Default.Build
+                                    else -> Icons.Default.Subscriptions
                                 }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(ic, null, tint = TvStatsPrimary, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("${svc.name} · ${moneyFormat.format(svc.price)} BYN",
-                                        Modifier.weight(1f), fontSize = 12.sp)
+                                    Text("${svc.name} · ${moneyFormat.format(svc.price)} BYN", Modifier.weight(1f), fontSize = 12.sp)
                                     IconButton(onClick = { services.removeAt(i) }, modifier = Modifier.size(28.dp)) {
                                         Icon(Icons.Default.Close, "Удалить", tint = TvStatsRed, modifier = Modifier.size(16.dp))
                                     }
@@ -655,8 +793,7 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                                     Spacer(Modifier.width(8.dp))
                                 }
                                 Text("+${w.years} год", Modifier.weight(1f), fontSize = 14.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = TvStatsText)
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium, color = TvStatsText)
                                 Text("${moneyFormat.format(w.price)} BYN", color = TvStatsPrimary,
                                     fontSize = 13.sp, fontWeight = FontWeight.Bold)
                             }
@@ -687,49 +824,36 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
                 }
 
                 OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
+                    value = searchQuery, onValueChange = { searchQuery = it },
                     label = { Text(if (searchMode == "bracket") "Кронштейн..." else "Саундбар...") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = {
-                        hideKeyboardNow()
-                        doSearch()
-                    })
+                    keyboardActions = KeyboardActions(onSearch = { hideKeyboardNow(); doSearch() })
                 )
 
                 Button(
-                    onClick = {
-                        hideKeyboardNow()
-                        doSearch()
-                    },
+                    onClick = { hideKeyboardNow(); doSearch() },
                     enabled = searchQuery.length >= 3 && !searching,
                     colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     if (searching) {
                         CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Ищу...")
+                        Spacer(Modifier.width(8.dp)); Text("Ищу...")
                     } else {
                         Icon(Icons.Default.Search, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Найти")
+                        Spacer(Modifier.width(6.dp)); Text("Найти")
                     }
                 }
 
                 searchResults.forEach { prod ->
                     Card(Modifier.fillMaxWidth().clickable {
                         accessories.add(AccessoryItem(prod.name, prod.price))
-                        searchResults = emptyList(); searchQuery = ""
-                        hideKeyboardNow()
+                        searchResults = emptyList(); searchQuery = ""; hideKeyboardNow()
                     }, colors = CardDefaults.cardColors(containerColor = TvStatsBg)) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(8.dp)) {
-                            Icon(
-                                if (searchMode == "bracket") Icons.Default.Build else Icons.Default.Speaker,
-                                null, tint = TvStatsPrimary, modifier = Modifier.size(18.dp)
-                            )
+                            Icon(if (searchMode == "bracket") Icons.Default.Build else Icons.Default.Speaker,
+                                null, tint = TvStatsPrimary, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(prod.name, fontSize = 13.sp, color = TvStatsText)
@@ -772,19 +896,38 @@ fun AccessoryPanel(sale: Sale, onDismiss: () -> Unit, onSave: (Sale) -> Unit) {
     )
 }
 
+// ===== НАСТРОЙКИ =====
 @Composable
 fun SettingsScreen(
     sales: List<Sale>,
     plans: Map<String, EmployeePlan>,
     employees: List<String>,
+    employeeBrands: Map<String, String>,
     onPlansChange: (Map<String, EmployeePlan>) -> Unit,
-    onEmployeesChange: (List<String>) -> Unit
+    onEmployeesChange: (List<String>) -> Unit,
+    onBrandsChange: (Map<String, String>) -> Unit
 ) {
     var selectedEmployee by remember { mutableStateOf<String?>(null) }
     var editingEmployeeIndex by remember { mutableStateOf<Int?>(null) }
     var editingName by remember { mutableStateOf("") }
+    var editingBrandIndex by remember { mutableStateOf<Int?>(null) }
+    var editingBrand by remember { mutableStateOf("") }
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+
+    // Статистика брендов
+    val brandCounts = mutableMapOf<String, Int>()
+    var otherCount = 0
+    sales.filter { it.category == "tovar" && it.model.contains("Телевизор", ignoreCase = true) }
+        .forEach { sale ->
+            val brand = detectBrand(sale.model)
+            if (brand == "TCL" || brand == "LG" || brand == "Quantum") {
+                brandCounts[brand] = (brandCounts[brand] ?: 0) + 1
+            } else {
+                otherCount++
+            }
+        }
+    val totalTV = brandCounts.values.sum() + otherCount
 
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -792,11 +935,34 @@ fun SettingsScreen(
         Text("Результат сотрудника", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TvStatsText)
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
 
+        // === СТАТИСТИКА БРЕНДОВ ===
+        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = TvStatsCard),
+            elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Статистика брендов ТВ", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
+                Spacer(Modifier.height(8.dp))
+                Text("Всего ТВ: $totalTV", fontSize = 14.sp, color = TvStatsTextSecondary)
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Info, null, tint = TvStatsOrange, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Иные ТВ: $otherCount", fontSize = 15.sp, color = TvStatsOrange, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(8.dp))
+                brandCounts.forEach { (brand, count) ->
+                    Text("$brand: $count", fontSize = 14.sp, color = TvStatsPrimary, fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+
+        // === СОТРУДНИКИ ===
         employees.forEachIndexed { empIndex, name ->
             val employeeSales = sales.filter { it.employee == name }
             val factProduct = employeeSales.sumOf { it.price }
             val factAccessories = employeeSales.sumOf { it.accessorySum }
             val factService = employeeSales.sumOf { it.serviceSum }
+            val brand = employeeBrands[name] ?: ""
+            val brandSold = brandCounts[brand] ?: 0
 
             val plan = plans[name] ?: EmployeePlan()
             val planAccessories = if (plan.accessories > 0) plan.accessories else plan.product * 0.17
@@ -806,17 +972,19 @@ fun SettingsScreen(
                 elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(name, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                            modifier = Modifier.weight(1f), color = TvStatsText)
-
-                        // Кнопка изменения имени
-                        IconButton(onClick = {
-                            editingEmployeeIndex = empIndex
-                            editingName = name
-                        }) {
+                        Column(Modifier.weight(1f)) {
+                            Text(name, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TvStatsText)
+                            if (brand.isNotEmpty()) {
+                                Text("$brand · продано: $brandSold ТВ", fontSize = 13.sp, color = TvStatsPrimary,
+                                    fontWeight = FontWeight.Medium)
+                            }
+                        }
+                        IconButton(onClick = { editingEmployeeIndex = empIndex; editingName = name }) {
                             Icon(Icons.Default.Person, "Изменить имя", tint = TvStatsPrimary)
                         }
-
+                        IconButton(onClick = { editingBrandIndex = empIndex; editingBrand = brand }) {
+                            Icon(Icons.Default.Star, "Изменить бренд", tint = TvStatsOrange)
+                        }
                         IconButton(onClick = {
                             selectedEmployee = if (selectedEmployee == name) null else name
                         }) {
@@ -832,64 +1000,40 @@ fun SettingsScreen(
                             var accInput by remember(name) { mutableStateOf(planAccessories.toInt().toString()) }
                             var srvInput by remember(name) { mutableStateOf(planService.toInt().toString()) }
 
-                            OutlinedTextField(
-                                value = productInput,
+                            OutlinedTextField(value = productInput,
                                 onValueChange = { new -> productInput = new.filter { it.isDigit() } },
                                 label = { Text("План товар, BYN") },
-                                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
-                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = {
-                                    keyboard?.hide(); focusManager.clearFocus(force = true)
-                                })
-                            )
-                            OutlinedTextField(
-                                value = accInput,
+                                keyboardActions = KeyboardActions(onDone = { keyboard?.hide(); focusManager.clearFocus(force = true) }))
+                            OutlinedTextField(value = accInput,
                                 onValueChange = { new -> accInput = new.filter { it.isDigit() } },
                                 label = { Text("План аксессуары, BYN") },
-                                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
-                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = {
-                                    keyboard?.hide(); focusManager.clearFocus(force = true)
-                                })
-                            )
-                            OutlinedTextField(
-                                value = srvInput,
+                                keyboardActions = KeyboardActions(onDone = { keyboard?.hide(); focusManager.clearFocus(force = true) }))
+                            OutlinedTextField(value = srvInput,
                                 onValueChange = { new -> srvInput = new.filter { it.isDigit() } },
                                 label = { Text("План доп. сервис, BYN") },
-                                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
-                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = {
-                                    keyboard?.hide(); focusManager.clearFocus(force = true)
-                                })
-                            )
-                            Button(
-                                onClick = {
-                                    val p = productInput.toDoubleOrNull() ?: plan.product
-                                    val a = accInput.toDoubleOrNull() ?: planAccessories
-                                    val s = srvInput.toDoubleOrNull() ?: planService
-                                    onPlansChange(plans + (name to EmployeePlan(p, a, s)))
-                                    selectedEmployee = null
-                                    keyboard?.hide()
-                                    focusManager.clearFocus(force = true)
-                                },
-                                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary)
-                            ) { Text("Сохранить") }
+                                keyboardActions = KeyboardActions(onDone = { keyboard?.hide(); focusManager.clearFocus(force = true) }))
+                            Button(onClick = {
+                                val p = productInput.toDoubleOrNull() ?: plan.product
+                                val a = accInput.toDoubleOrNull() ?: planAccessories
+                                val s = srvInput.toDoubleOrNull() ?: planService
+                                onPlansChange(plans + (name to EmployeePlan(p, a, s)))
+                                selectedEmployee = null; keyboard?.hide(); focusManager.clearFocus(force = true)
+                            }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = TvStatsPrimary)) { Text("Сохранить") }
                         }
                     }
 
                     Spacer(Modifier.height(12.dp))
                     MetricRow("Товар", factProduct, plan.product)
-                    Spacer(Modifier.height(12.dp))
-                    HorizontalDivider()
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(12.dp)); HorizontalDivider(); Spacer(Modifier.height(12.dp))
                     MetricRow("Аксессуары", factAccessories, planAccessories)
-                    Spacer(Modifier.height(12.dp))
-                    HorizontalDivider()
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(12.dp)); HorizontalDivider(); Spacer(Modifier.height(12.dp))
                     MetricRow("Доп. сервис", factService, planService)
                 }
             }
@@ -899,7 +1043,7 @@ fun SettingsScreen(
             elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("О приложении", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TvStatsText)
-                Text("Версия: 1.18.0", fontSize = 14.sp, color = TvStatsTextSecondary)
+                Text("Версия: 1.19.0", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Разработчик: Матранг", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Сотрудники: ${employees.joinToString(", ")}", fontSize = 14.sp, color = TvStatsTextSecondary)
                 Text("Источник: 5element.by", fontSize = 14.sp, color = TvStatsTextSecondary)
@@ -913,31 +1057,83 @@ fun SettingsScreen(
             onDismissRequest = { editingEmployeeIndex = null },
             title = { Text("Изменить имя сотрудника", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
             text = {
-                OutlinedTextField(
-                    value = editingName,
-                    onValueChange = { editingName = it },
-                    label = { Text("Имя") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
+                OutlinedTextField(value = editingName, onValueChange = { editingName = it },
+                    label = { Text("Имя") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             },
             confirmButton = {
                 Button(onClick = {
                     val newList = employees.toMutableList()
                     if (idx in newList.indices && editingName.isNotBlank()) {
+                        val oldName = newList[idx]
                         newList[idx] = editingName.trim()
                         onEmployeesChange(newList)
+                        // Обновляем бренд
+                        val newBrands = employeeBrands.toMutableMap()
+                        employeeBrands[oldName]?.let { newBrands[editingName.trim()] = it }
+                        newBrands.remove(oldName)
+                        onBrandsChange(newBrands)
                     }
                     editingEmployeeIndex = null
                 }) { Text("Сохранить") }
             },
-            dismissButton = {
-                TextButton(onClick = { editingEmployeeIndex = null }) { Text("Отмена") }
-            }
+            dismissButton = { TextButton(onClick = { editingEmployeeIndex = null }) { Text("Отмена") } }
+        )
+    }
+
+    // Диалог изменения бренда
+    editingBrandIndex?.let { idx ->
+        AlertDialog(
+            onDismissRequest = { editingBrandIndex = null },
+            title = { Text("Бренд сотрудника", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    listOf("TCL", "LG", "Quantum", "Samsung", "Hisense", "Haier", "Другой").forEach { b ->
+                        Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
+                            editingBrand = b
+                        }, colors = CardDefaults.cardColors(
+                            containerColor = if (b == editingBrand) TvStatsPrimary.copy(alpha = 0.15f) else TvStatsBg
+                        )) {
+                            Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (b == editingBrand) {
+                                    Icon(Icons.Default.Check, null, tint = TvStatsPrimary, modifier = Modifier.size(20.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                }
+                                Text(b, fontSize = 15.sp, color = TvStatsText)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val empName = employees.getOrNull(idx) ?: return@Button
+                    onBrandsChange(employeeBrands + (empName to editingBrand))
+                    editingBrandIndex = null
+                }) { Text("Сохранить") }
+            },
+            dismissButton = { TextButton(onClick = { editingBrandIndex = null }) { Text("Отмена") } }
         )
     }
 }
 
+// ===== ОПРЕДЕЛЕНИЕ БРЕНДА =====
+fun detectBrand(modelName: String): String {
+    val u = modelName.uppercase()
+    return when {
+        u.contains("SAMSUNG") || u.contains("UE") || u.contains("QE") -> "Samsung"
+        u.contains("LG") || u.contains("QNED") || u.contains("OLED") || u.contains("NANO") -> "LG"
+        u.contains("TCL") || u.contains("QLED") || u.contains("P79") || u.contains("MQLED") -> "TCL"
+        u.contains("QUANTUM") || u.contains("КВАНТУМ") -> "Quantum"
+        u.contains("HISENSE") -> "Hisense"
+        u.contains("HAIER") -> "Haier"
+        u.contains("XIAOMI") -> "Xiaomi"
+        u.contains("SONY") -> "Sony"
+        u.contains("PHILIPS") -> "Philips"
+        else -> "Иной"
+    }
+}
+
+// ===== МЕТРИКА =====
 @Composable
 fun MetricRow(title: String, fact: Double, plan: Double) {
     val percent = if (plan > 0) (fact / plan * 100).coerceAtMost(999.0) else 0.0
@@ -963,19 +1159,15 @@ fun CircularProgress(percent: Double, color: Color, modifier: Modifier = Modifie
         Canvas(Modifier.fillMaxSize()) {
             val stroke = 14.dp.toPx()
             val size = this.size.minDimension - stroke
-            drawArc(
-                color = Color(0xFFE8EAF0), startAngle = -90f, sweepAngle = 360f, useCenter = false,
+            drawArc(color = Color(0xFFE8EAF0), startAngle = -90f, sweepAngle = 360f, useCenter = false,
                 style = Stroke(width = stroke, cap = StrokeCap.Round),
                 topLeft = androidx.compose.ui.geometry.Offset(stroke / 2, stroke / 2),
-                size = androidx.compose.ui.geometry.Size(size, size)
-            )
+                size = androidx.compose.ui.geometry.Size(size, size))
             val sweep = (percent / 100.0 * 360.0).coerceAtMost(360.0).toFloat()
-            drawArc(
-                color = color, startAngle = -90f, sweepAngle = sweep, useCenter = false,
+            drawArc(color = color, startAngle = -90f, sweepAngle = sweep, useCenter = false,
                 style = Stroke(width = stroke, cap = StrokeCap.Round),
                 topLeft = androidx.compose.ui.geometry.Offset(stroke / 2, stroke / 2),
-                size = androidx.compose.ui.geometry.Size(size, size)
-            )
+                size = androidx.compose.ui.geometry.Size(size, size))
         }
         Text("%.1f%%".format(percent), fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TvStatsText)
     }
